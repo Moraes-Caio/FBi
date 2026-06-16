@@ -1,0 +1,13 @@
+{
+  "_versions": {
+    "chamar-ia": 31,
+    "gerar-insights": 21,
+    "sugerir-acoes": 20,
+    "atualizar-banner": 16,
+    "gerar-perguntas-direcionadas": 17,
+    "gerar-plano-acao": 4,
+    "webhook-n8n": 3,
+    "qr-redirect": 2,
+    "gerenciar-qr-code": 1
+  }
+}
