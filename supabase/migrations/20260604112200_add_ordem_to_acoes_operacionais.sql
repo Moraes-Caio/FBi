@@ -1,0 +1,1 @@
+ALTER TABLE public.acoes_operacionais ADD COLUMN IF NOT EXISTS ordem INTEGER NOT NULL DEFAULT 0;
