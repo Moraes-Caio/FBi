@@ -4,6 +4,13 @@ import { ChevronLeft, Camera, Mail, AtSign, UserIcon, Briefcase } from 'lucide-r
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useAuth } from '@/hooks/use-auth'
 import { supabase } from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
@@ -264,13 +271,19 @@ export default function MyAccount() {
                     <Briefcase className="h-4 w-4 text-gray-400" />
                     Cargo / Função
                   </Label>
-                  <Input
-                    id="cargo"
+                  <Select
                     value={formData.cargo}
-                    onChange={(e) => setFormData({ ...formData, cargo: e.target.value })}
-                    className="max-w-md"
-                    placeholder="Ex: Gerente Geral"
-                  />
+                    onValueChange={(v) => setFormData({ ...formData, cargo: v })}
+                  >
+                    <SelectTrigger className="max-w-md">
+                      <SelectValue placeholder="Selecione seu cargo..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Administrador</SelectItem>
+                      <SelectItem value="gerente">Gerente</SelectItem>
+                      <SelectItem value="visualizador">Visualizador</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2.5">

@@ -87,7 +87,7 @@ export function AiBanner() {
         <div className="flex-shrink-0 h-12 w-12 rounded-xl bg-orange-50 flex items-center justify-center text-warning border border-orange-100">
           <Bot className="h-6 w-6" />
         </div>
-        <div className="flex-1 text-sm text-foreground leading-relaxed pr-8">
+        <div className="flex-1 text-sm text-foreground leading-relaxed">
           {loading ? (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" /> Carregando resumo...
@@ -96,22 +96,22 @@ export function AiBanner() {
             textoBanner || defaultText
           )}
         </div>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mt-2 sm:mt-0">
+        <div className="flex items-center gap-3 mt-2 sm:mt-0 flex-shrink-0">
+          <button
+            onClick={atualizarAgora}
+            disabled={refreshing || loading}
+            className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            title="Atualizar agora"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin text-primary' : ''}`} />
+          </button>
           <button
             onClick={() => document.dispatchEvent(new CustomEvent('open-ai-chat'))}
-            className="flex-shrink-0 flex items-center gap-1 text-sm font-medium text-primary hover:text-primary/80 transition-colors"
+            className="flex items-center gap-1 text-sm font-medium text-primary hover:text-primary/80 transition-colors whitespace-nowrap"
           >
             Conversar sobre isso <ArrowRight className="h-4 w-4" />
           </button>
         </div>
-        <button
-          onClick={atualizarAgora}
-          disabled={refreshing || loading}
-          className="absolute right-4 top-4 sm:top-auto text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-          title="Atualizar agora"
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin text-primary' : ''}`} />
-        </button>
       </CardContent>
     </Card>
   )

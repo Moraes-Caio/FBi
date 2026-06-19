@@ -92,22 +92,26 @@ export default function Onboarding() {
 
     setLoadingSubmit(true)
     try {
-      const { error } = await supabase
-        .from('usuarios')
-        .update({
-          configuracoes: data as any,
-          onboarding_completo: true,
-        })
-        .eq('id', usuario.id)
+      const { error: rpcError } = await supabase.rpc('criar_restaurante_onboarding', {
+        p_nome_restaurante: data.restaurante_nome,
+        p_mascote_config: {
+          nome: data.ia_nome || 'Chef Pepê',
+          personalidade: data.ia_tom || 'profissional_amigavel',
+        },
+      })
 
-      if (error) throw error
+      if (rpcError) throw rpcError
+
+      await supabase
+        .from('usuarios')
+        .update({ configuracoes: data as any })
+        .eq('id', usuario.id)
 
       toast({
         title: 'Tudo pronto!',
         description: 'Seu ambiente foi configurado com sucesso.',
       })
 
-      // Force reload to update auth context state and safely load dashboard
       window.location.href = '/'
     } catch (error) {
       console.error('Erro ao salvar onboarding:', error)

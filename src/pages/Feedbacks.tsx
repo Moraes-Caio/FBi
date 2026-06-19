@@ -23,7 +23,6 @@ import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { buscarFeedbacks, buscarCategoriasAtivas, FiltrosFeedback } from '@/lib/queries/feedbacks'
 import { useAuth } from '@/hooks/use-auth'
-import { supabase } from '@/lib/supabase/client'
 
 const WhatsAppIcon = ({ className }: { className?: string }) => (
   <svg
@@ -38,13 +37,12 @@ const WhatsAppIcon = ({ className }: { className?: string }) => (
 
 export default function Feedbacks() {
   const { toast } = useToast()
-  const { user } = useAuth()
+  const { usuario } = useAuth()
 
   const [feedbacks, setFeedbacks] = useState<any[]>([])
   const [totalFeedbacks, setTotalFeedbacks] = useState(0)
   const [loading, setLoading] = useState(true)
   const [categoriasDisponiveis, setCategoriasDisponiveis] = useState<string[]>([])
-  const [restauranteId, setRestauranteId] = useState<number | undefined>()
 
   const [filtros, setFiltros] = useState<FiltrosFeedback>({
     periodo: '7d',
@@ -57,19 +55,10 @@ export default function Feedbacks() {
   const LIMIT = 10
 
   useEffect(() => {
-    if (user) {
-      supabase
-        .from('usuarios')
-        .select('restaurante_id')
-        .eq('id', user.id)
-        .single()
-        .then(({ data }) => setRestauranteId(data?.restaurante_id))
-    }
-  }, [user])
-
-  useEffect(() => {
-    buscarCategoriasAtivas(restauranteId).then(setCategoriasDisponiveis).catch(console.error)
-  }, [restauranteId])
+    buscarCategoriasAtivas(usuario?.restaurante_id ?? undefined)
+      .then(setCategoriasDisponiveis)
+      .catch(console.error)
+  }, [usuario?.restaurante_id])
 
   const carregarFeedbacks = useCallback(
     async (isLoadMore = false) => {

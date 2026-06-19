@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Settings2 } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -8,13 +8,28 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { InsightCard } from '@/components/insights/InsightCard'
 import { TaskModal } from '@/components/insights/TaskModal'
 import { AiChatSheet } from '@/components/insights/AiChatSheet'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase/client'
+import { criarAcao } from '@/lib/queries/acoes'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
+
+// Opções de gatilho da geração automática: de 5 em 5, mínimo 5, máximo 15
+const FEEDBACK_OPTIONS = [5, 10, 15]
 
 export default function Insights() {
   const [filterPriority, setFilterPriority] = useState<string>('Todos')
@@ -29,24 +44,24 @@ export default function Insights() {
   const [aiChatOpen, setAiChatOpen] = useState(false)
   const [selectedInsight, setSelectedInsight] = useState<any>(null)
 
-  const { user } = useAuth()
+  // Configuração da geração automática (feedbacks acumulados que disparam análise)
+  const [configOpen, setConfigOpen] = useState(false)
+  const [feedbacksPorAnalise, setFeedbacksPorAnalise] = useState(5)
+  const [savedFeedbacksPorAnalise, setSavedFeedbacksPorAnalise] = useState(5)
+  const [savingConfig, setSavingConfig] = useState(false)
+
+  const { usuario } = useAuth()
   const { toast } = useToast()
 
   const fetchInsights = async () => {
+    if (!usuario?.restaurante_id) return
     setLoading(true)
     try {
-      const { data: userData } = await supabase
-        .from('usuarios')
-        .select('restaurante_id')
-        .eq('id', user?.id)
-        .single()
-      const restId = userData?.restaurante_id
-
       const { data, error } = await supabase
         .from('insights')
         .select('*')
         .eq('ativo', true)
-        .eq('restaurante_id', restId || 1)
+        .eq('restaurante_id', usuario.restaurante_id)
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -65,39 +80,106 @@ export default function Insights() {
     }
   }
 
-  useEffect(() => {
-    if (user) fetchInsights()
-  }, [user])
-
-  const handleGerarInsights = async () => {
-    if (
-      !window.confirm(
-        'Deseja forçar a geração de insights agora? O Chef Pepê analisará todos os feedbacks recentes.',
-      )
-    )
-      return
-
-    setGenerating(true)
+  const fetchConfigInsights = async () => {
+    if (!usuario?.restaurante_id) return
     try {
-      const { data: userData } = await supabase
-        .from('usuarios')
-        .select('restaurante_id')
-        .eq('id', user?.id)
+      const { data, error } = await supabase
+        .from('config_restaurantes')
+        .select('config_insights')
+        .eq('id', usuario.restaurante_id)
         .single()
 
+      if (error) throw error
+
+      const atual = (data?.config_insights as any)?.feedbacks_por_analise
+      const valor = FEEDBACK_OPTIONS.includes(atual) ? atual : 5
+      setFeedbacksPorAnalise(valor)
+      setSavedFeedbacksPorAnalise(valor)
+    } catch {
+      // Mantém o padrão (5) se não conseguir carregar
+    }
+  }
+
+  const handleSalvarConfig = async () => {
+    if (!usuario?.restaurante_id) return
+    // Defesa: garante valor dentro de [5, 15] em passos de 5
+    const valor = FEEDBACK_OPTIONS.includes(feedbacksPorAnalise) ? feedbacksPorAnalise : 5
+    setSavingConfig(true)
+    try {
+      // Lê o jsonb atual para preservar as outras chaves
+      const { data: cfg } = await supabase
+        .from('config_restaurantes')
+        .select('config_insights')
+        .eq('id', usuario.restaurante_id)
+        .single()
+
+      const merged = { ...((cfg?.config_insights as any) || {}), feedbacks_por_analise: valor }
+
+      const { error } = await supabase
+        .from('config_restaurantes')
+        .update({ config_insights: merged })
+        .eq('id', usuario.restaurante_id)
+
+      if (error) throw error
+
+      setSavedFeedbacksPorAnalise(valor)
+      setConfigOpen(false)
+      toast({
+        title: 'Configuração salva',
+        description: `A análise automática será disparada a cada ${valor} novos feedbacks.`,
+      })
+    } catch (e: any) {
+      toast({ title: 'Erro ao salvar', description: e.message, variant: 'destructive' })
+    } finally {
+      setSavingConfig(false)
+    }
+  }
+
+  useEffect(() => {
+    if (usuario?.restaurante_id) {
+      fetchInsights()
+      fetchConfigInsights()
+    }
+  }, [usuario?.restaurante_id])
+
+  const handleGerarInsights = async () => {
+    setGenerating(true)
+    try {
       const { data, error } = await supabase.functions.invoke('gerar-insights', {
-        body: { restaurante_id: userData?.restaurante_id || 1, force: true },
+        body: { force: true },
       })
 
       if (error) throw error
 
-      toast({
-        title: 'Análise concluída!',
-        description:
-          data.insights_gerados > 0
-            ? `Foram gerados ${data.insights_gerados} novos insights operacionais.`
-            : 'Não há novos feedbacks suficientes para gerar insights diferentes agora.',
-      })
+      const analisados = data?.feedbacks_analisados ?? 0
+
+      switch (data?.status) {
+        case 'sucesso':
+          toast({
+            title: 'Análise concluída!',
+            description: `${data.insights_gerados} novos insights gerados a partir de ${analisados} feedbacks.`,
+          })
+          break
+        case 'sem_feedbacks':
+          toast({
+            title: 'Nenhum feedback encontrado',
+            description: 'Ainda não há feedbacks registrados para analisar.',
+            variant: 'destructive',
+          })
+          break
+        case 'insuficiente':
+          toast({
+            title: 'Feedbacks insuficientes',
+            description: `É necessário um mínimo de ${data?.minimo_necessario ?? 3} feedbacks para gerar insights. No momento há ${analisados}.`,
+            variant: 'destructive',
+          })
+          break
+        default:
+          toast({
+            title: 'Análise concluída sem novidades',
+            description: `${analisados} feedbacks analisados. Nenhum padrão novo encontrado no momento.`,
+          })
+      }
       fetchInsights()
     } catch (e: any) {
       toast({ title: 'Erro ao gerar insights', description: e.message, variant: 'destructive' })
@@ -116,28 +198,41 @@ export default function Insights() {
     setAiChatOpen(true)
   }
 
-  const handleSaveTask = async (taskData: any) => {
+  const handleDeleteInsight = async (id: string) => {
     try {
-      const { data: userData } = await supabase
-        .from('usuarios')
-        .select('restaurante_id')
-        .eq('id', user?.id)
-        .single()
+      const { error } = await supabase.from('insights').delete().eq('id', id)
+      if (error) throw error
+      setInsights((prev) => prev.filter((i) => i.id !== id))
+      toast({ title: 'Insight excluído', description: 'O insight foi removido com sucesso.' })
+    } catch (e: any) {
+      toast({ title: 'Erro ao excluir', description: e.message, variant: 'destructive' })
+    }
+  }
 
-      const { error } = await supabase.from('acoes_operacionais').insert({
+  const handleSaveTask = async (taskData: any) => {
+    if (!usuario?.restaurante_id) return
+    try {
+      const novaAcao = await criarAcao({
         titulo_acao: taskData.title,
         prioridade: taskData.priority,
-        categoria: selectedInsight?.categoria,
+        categoria: selectedInsight?.categoria || 'Geral',
         texto: selectedInsight?.descricao,
         status: 'PENDENTE',
+        restaurante_id: usuario.restaurante_id,
         client_id: null,
+        ordem: 0,
       })
 
-      if (error) throw error
       toast({
         title: 'Tarefa criada com sucesso',
         description: 'Ação adicionada ao seu painel operacional.',
       })
+
+      if (novaAcao?.id) {
+        supabase.functions
+          .invoke('gerar-perguntas-direcionadas', { body: { acao_id: novaAcao.id } })
+          .catch(console.error)
+      }
     } catch (e: any) {
       toast({ title: 'Erro ao criar tarefa', description: e.message, variant: 'destructive' })
     }
@@ -194,14 +289,122 @@ export default function Insights() {
         </div>
 
         <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
-          <Button
-            onClick={handleGerarInsights}
-            disabled={generating}
-            className="w-full sm:w-auto bg-[#1D4ED8] hover:bg-blue-800 text-white font-medium shadow-sm transition-all"
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                disabled={generating}
+                className="w-full sm:w-auto bg-[#1D4ED8] hover:bg-blue-800 text-white font-medium shadow-sm transition-all"
+              >
+                <RefreshCw className={cn('w-4 h-4 mr-2', generating && 'animate-spin')} />
+                {generating ? 'Analisando dados...' : 'Gerar insights agora'}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Gerar insights agora?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  O Chef Pepê analisará todos os feedbacks recentes e gerará novos insights
+                  operacionais. Os insights anteriores serão substituídos.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleGerarInsights}
+                  className="bg-[#1D4ED8] hover:bg-blue-800 text-white"
+                >
+                  Gerar agora
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog
+            open={configOpen}
+            onOpenChange={(open) => {
+              setConfigOpen(open)
+              if (open) setFeedbacksPorAnalise(savedFeedbacksPorAnalise)
+            }}
           >
-            <RefreshCw className={cn('w-4 h-4 mr-2', generating && 'animate-spin')} />
-            {generating ? 'Analisando dados...' : 'Gerar insights agora'}
-          </Button>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                title="Configurar geração automática"
+                className="order-first shrink-0 border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 shadow-sm"
+              >
+                <Settings2 className="w-4 h-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Geração automática de insights</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Defina quantos novos feedbacks acumulados disparam uma análise automática do Chef
+                  Pepê. Você sempre pode gerar insights manualmente a qualquer momento.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+
+              <div className="py-2">
+                <p className="text-sm font-medium text-gray-700 mb-3">
+                  Analisar automaticamente a cada:
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                  {FEEDBACK_OPTIONS.map((opt) => {
+                    const isActive = feedbacksPorAnalise === opt
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setFeedbacksPorAnalise(opt)}
+                        className={cn(
+                          'flex flex-col items-center justify-center rounded-xl border-2 py-4 transition-all outline-none',
+                          isActive
+                            ? 'border-[#1D4ED8] bg-blue-50/60 shadow-sm'
+                            : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50',
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'text-2xl font-bold',
+                            isActive ? 'text-[#1D4ED8]' : 'text-gray-900',
+                          )}
+                        >
+                          {opt}
+                        </span>
+                        <span
+                          className={cn(
+                            'text-xs mt-0.5',
+                            isActive ? 'text-[#1D4ED8]' : 'text-gray-500',
+                          )}
+                        >
+                          feedbacks
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-xs text-gray-400 mt-3">
+                  Valores menores geram insights com mais frequência; valores maiores aguardam mais
+                  dados antes de analisar.
+                </p>
+              </div>
+
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={savingConfig}>Cancelar</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={(e) => {
+                    e.preventDefault()
+                    handleSalvarConfig()
+                  }}
+                  disabled={savingConfig}
+                  className="bg-[#1D4ED8] hover:bg-blue-800 text-white"
+                >
+                  {savingConfig ? 'Salvando...' : 'Salvar'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
 
@@ -255,6 +458,7 @@ export default function Insights() {
                 insight={insight}
                 onCreateTask={() => handleCreateTask(insight)}
                 onAiChat={() => handleAiChat(insight)}
+                onDelete={() => handleDeleteInsight(insight.id)}
               />
             ))
           ) : (

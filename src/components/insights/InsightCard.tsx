@@ -1,7 +1,18 @@
-import { Lightbulb } from 'lucide-react'
+import { Lightbulb, Trash2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { Link } from 'react-router-dom'
 
@@ -9,6 +20,7 @@ interface InsightCardProps {
   insight: any
   onCreateTask: () => void
   onAiChat: () => void
+  onDelete: () => void
 }
 
 const priorityConfig: Record<string, any> = {
@@ -18,13 +30,41 @@ const priorityConfig: Record<string, any> = {
   OBSERVACAO: { bg: 'bg-[#F3F4F6]', text: 'text-[#6B7280]', label: 'OBSERVAÇÃO' },
 }
 
-export function InsightCard({ insight, onCreateTask, onAiChat }: InsightCardProps) {
+export function InsightCard({ insight, onCreateTask, onAiChat, onDelete }: InsightCardProps) {
   const prio = insight.prioridade || insight.priority || 'OBSERVACAO'
   const config = priorityConfig[prio] || priorityConfig['OBSERVACAO']
 
   return (
-    <Card className="bg-white border-border shadow-sm flex flex-col hover:shadow-md transition-shadow duration-200 h-full">
-      <CardHeader className="pb-3 space-y-3">
+    <Card className="bg-white border-border shadow-sm flex flex-col hover:shadow-md transition-shadow duration-200 h-full relative">
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <button
+            className="absolute top-3 right-3 h-8 w-8 flex items-center justify-center rounded border border-red-400 text-red-400 hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors z-10"
+            title="Excluir insight"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. O insight será excluído permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={onDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <CardHeader className="pb-3 space-y-3 pr-12">
         <div>
           <Badge
             variant="secondary"

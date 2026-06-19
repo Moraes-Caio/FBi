@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { MOCK_DATA, type PeriodInfo, type DashboardData } from '@/lib/mock-data'
+import type { PeriodInfo, DashboardData } from '@/lib/queries/visao-geral'
 import { AiBanner } from '@/components/dashboard/AiBanner'
 import { KpiCards } from '@/components/dashboard/KpiCards'
 import { TrendChart } from '@/components/dashboard/TrendChart'
@@ -14,13 +14,16 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/hooks/use-auth'
+import { MessageSquare, Settings } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
 
 export default function Index() {
   const [period, setPeriod] = useState<PeriodInfo>('7d')
-  const [currentData, setCurrentData] = useState<DashboardData>(MOCK_DATA['7d'])
+  const [data, setData] = useState<DashboardData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
-  const { user } = useAuth()
+  const { usuario } = useAuth()
 
   useEffect(() => {
     let mounted = true
@@ -28,7 +31,7 @@ export default function Index() {
     const loadData = async () => {
       setIsLoading(true)
       try {
-        const restauranteId = user?.user_metadata?.restaurante_id || null
+        const restauranteId = usuario?.restaurante_id ?? null
 
         const [kpis, chartData, categories, recentFeedbacks] = await Promise.all([
           buscarKpis(restauranteId, period),
@@ -38,47 +41,26 @@ export default function Index() {
         ])
 
         if (!mounted) return
-
-        if (kpis.totalFeedbacks > 5) {
-          setCurrentData({
-            kpis,
-            chartData,
-            categories,
-            recentFeedbacks,
-          })
-        } else {
-          // Fallback to mock data if there are not enough real feedbacks
-          setCurrentData(MOCK_DATA[period])
-          toast({
-            title: 'Modo de demonstração',
-            description:
-              'Exibindo dados de exemplo. Adicione mais feedbacks para ver métricas reais.',
-            duration: 5000,
-          })
-        }
+        setData({ kpis, chartData, categories, recentFeedbacks })
       } catch (error) {
         console.error('Erro ao carregar visão geral:', error)
         if (mounted) {
-          setCurrentData(MOCK_DATA[period])
           toast({
             title: 'Erro ao carregar dados',
-            description: 'Não foi possível carregar os dados reais. Exibindo dados de exemplo.',
+            description: 'Não foi possível carregar os dados do dashboard.',
             variant: 'destructive',
           })
         }
       } finally {
-        if (mounted) {
-          setIsLoading(false)
-        }
+        if (mounted) setIsLoading(false)
       }
     }
 
     loadData()
+    return () => { mounted = false }
+  }, [period, toast, usuario])
 
-    return () => {
-      mounted = false
-    }
-  }, [period, toast, user])
+  const isEmpty = !isLoading && data?.kpis.totalFeedbacks === 0
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-10">
@@ -98,18 +80,40 @@ export default function Index() {
           </div>
           <Skeleton className="h-[400px] w-full" />
         </>
-      ) : (
-        <>
-          <KpiCards data={currentData.kpis} />
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <TrendChart data={currentData.chartData} period={period} onPeriodChange={setPeriod} />
-            <CategoryScores categories={currentData.categories} />
+      ) : isEmpty ? (
+        <div className="flex flex-col items-center justify-center py-24 text-center">
+          <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-blue-50 mb-6">
+            <MessageSquare className="h-10 w-10 text-[#1D4ED8]" />
           </div>
-
-          <RecentFeedbacks feedbacks={currentData.recentFeedbacks} />
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            Você ainda não recebeu nenhum feedback
+          </h2>
+          <p className="text-gray-500 max-w-md mb-8">
+            Configure o WhatsApp nas configurações do restaurante e compartilhe o QR Code com seus
+            clientes para começar a coletar feedbacks.
+          </p>
+          <div className="flex gap-3">
+            <Button asChild className="bg-[#1D4ED8] hover:bg-blue-700">
+              <Link to="/configuracoes">
+                <Settings className="mr-2 h-4 w-4" />
+                Ir para Configurações
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/qrcode">Ver QR Code</Link>
+            </Button>
+          </div>
+        </div>
+      ) : data ? (
+        <>
+          <KpiCards data={data.kpis} />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <TrendChart data={data.chartData} period={period} onPeriodChange={setPeriod} />
+            <CategoryScores categories={data.categories} />
+          </div>
+          <RecentFeedbacks feedbacks={data.recentFeedbacks} />
         </>
-      )}
+      ) : null}
     </div>
   )
 }
