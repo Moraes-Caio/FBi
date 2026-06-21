@@ -1,6 +1,7 @@
 // AVOID UPDATING THIS FILE DIRECTLY. It is automatically generated.
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from './types'
+import { rememberMeStorage } from './auth-storage'
 
 // Fallback para a chave pública (anon) e URL: garante que o app funcione mesmo
 // sem arquivo .env (ex.: preview do Lovable). A chave anon é pública por design
@@ -16,7 +17,7 @@ const SUPABASE_PUBLISHABLE_KEY =
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
-    storage: localStorage,
+    storage: rememberMeStorage,
     persistSession: true,
     autoRefreshToken: true,
   },
