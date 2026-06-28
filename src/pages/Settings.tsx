@@ -71,10 +71,10 @@ export default function Settings() {
   if (!profile) return null
 
   const navItems = [
-    { id: 'restaurante', label: 'Restaurante e Integrações' },
-    { id: 'mascote', label: 'IA e Mascote' },
+    { id: 'restaurante', label: 'Restaurante' },
+    { id: 'mascote', label: 'Assistente de IA' },
     { id: 'categorias', label: 'Categorias de Feedback' },
-    { id: 'garcons', label: 'Garçons / Atendentes' },
+    { id: 'garcons', label: 'Garçons' },
     { id: 'equipe', label: 'Equipe de Acesso' },
   ]
 

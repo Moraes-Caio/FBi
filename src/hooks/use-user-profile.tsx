@@ -8,6 +8,7 @@ interface UserProfile {
   email: string
   cargo: string | null
   restaurante_id: number | null
+  avatar_url: string | null
 }
 
 export function useUserProfile() {

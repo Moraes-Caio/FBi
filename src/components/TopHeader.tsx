@@ -118,10 +118,7 @@ export function TopHeader() {
             <DropdownMenuTrigger asChild>
               <Avatar className="h-9 w-9 border border-border cursor-pointer hover:opacity-80 transition-opacity ring-offset-2 hover:ring-2 ring-primary/20">
                 <AvatarImage
-                  src={
-                    profile?.avatar_url ||
-                    `https://img.usecurling.com/ppl/thumbnail?seed=${usuario?.id}`
-                  }
+                  src={profile?.avatar_url || undefined}
                   alt={usuario?.nome || 'Usuário'}
                 />
                 <AvatarFallback>
@@ -137,12 +134,7 @@ export function TopHeader() {
               <div className="p-3 bg-secondary/20">
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10 border border-border/50 shadow-sm">
-                    <AvatarImage
-                      src={
-                        profile?.avatar_url ||
-                        `https://img.usecurling.com/ppl/thumbnail?seed=${usuario?.id}`
-                      }
-                    />
+                    <AvatarImage src={profile?.avatar_url || undefined} />
                     <AvatarFallback>
                       {usuario?.nome?.substring(0, 2).toUpperCase() || 'US'}
                     </AvatarFallback>

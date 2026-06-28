@@ -18,9 +18,11 @@ import Login from './pages/auth/Login'
 import Cadastro from './pages/auth/Cadastro'
 import RecuperarSenha from './pages/auth/RecuperarSenha'
 import Onboarding from './pages/auth/Onboarding'
+import OnboardingMembro from './pages/auth/OnboardingMembro'
 import MyAccount from './pages/MyAccount'
 import Notifications from './pages/Notifications'
 import { RotaProtegida } from './components/RotaProtegida'
+import { RotaPermitida } from './components/RotaPermitida'
 
 const App = () => (
   <AuthProvider>
@@ -35,15 +37,65 @@ const App = () => (
 
           <Route element={<RotaProtegida />}>
             <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/onboarding-membro" element={<OnboardingMembro />} />
             <Route path="/minha-conta" element={<MyAccount />} />
-            <Route path="/configuracoes" element={<Settings />} />
+            <Route
+              path="/configuracoes"
+              element={
+                <RotaPermitida modulo="configuracoes">
+                  <Settings />
+                </RotaPermitida>
+              }
+            />
             <Route element={<Layout />}>
-              <Route path="/" element={<Index />} />
-              <Route path="/feedbacks" element={<Feedbacks />} />
-              <Route path="/insights" element={<Insights />} />
-              <Route path="/acoes" element={<Actions />} />
-              <Route path="/relatorios" element={<Reports />} />
-              <Route path="/qrcode" element={<QRCodes />} />
+              <Route
+                path="/"
+                element={
+                  <RotaPermitida modulo="visao_geral">
+                    <Index />
+                  </RotaPermitida>
+                }
+              />
+              <Route
+                path="/feedbacks"
+                element={
+                  <RotaPermitida modulo="feedbacks">
+                    <Feedbacks />
+                  </RotaPermitida>
+                }
+              />
+              <Route
+                path="/insights"
+                element={
+                  <RotaPermitida modulo="insights">
+                    <Insights />
+                  </RotaPermitida>
+                }
+              />
+              <Route
+                path="/acoes"
+                element={
+                  <RotaPermitida modulo="acoes">
+                    <Actions />
+                  </RotaPermitida>
+                }
+              />
+              <Route
+                path="/relatorios"
+                element={
+                  <RotaPermitida modulo="relatorios">
+                    <Reports />
+                  </RotaPermitida>
+                }
+              />
+              <Route
+                path="/qrcode"
+                element={
+                  <RotaPermitida modulo="qrcodes">
+                    <QRCodes />
+                  </RotaPermitida>
+                }
+              />
               <Route path="/notificacoes" element={<Notifications />} />
             </Route>
           </Route>

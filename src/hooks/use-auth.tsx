@@ -38,18 +38,41 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const fetchUsuario = (userId: string) => {
-      supabase
+    const fetchUsuario = async (userAuth: import('@supabase/supabase-js').User) => {
+      const { data, error } = await supabase
         .from('usuarios')
         .select('*')
-        .eq('id', userId)
+        .eq('id', userAuth.id)
         .single()
-        .then(({ data, error }) => {
-          if (data) setUsuario(data as UsuarioDados)
-          else if (error) console.error('Erro ao buscar usuário:', error)
-          setLoading(false)
-        })
-        .catch(() => setLoading(false))
+
+      if (data) {
+        setUsuario(data as UsuarioDados)
+        setLoading(false)
+        return
+      }
+
+      // Usuário existe no Auth mas não tem registro em usuarios
+      // (criado direto no dashboard ou falha no cadastro)
+      if (error?.code === 'PGRST116') {
+        const { data: novo } = await supabase
+          .from('usuarios')
+          .insert({
+            id: userAuth.id,
+            email: userAuth.email || '',
+            nome: null,
+            onboarding_completo: false,
+            cargo: 'gerente',
+          })
+          .select('*')
+          .single()
+
+        setUsuario(novo as UsuarioDados | null)
+        setLoading(false)
+        return
+      }
+
+      console.error('Erro ao buscar usuário:', error)
+      setLoading(false)
     }
 
     const {
@@ -58,7 +81,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
-        fetchUsuario(session.user.id)
+        fetchUsuario(session.user)
       } else {
         setUsuario(null)
         setLoading(false)
@@ -69,7 +92,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
-        fetchUsuario(session.user.id)
+        fetchUsuario(session.user)
       } else {
         setLoading(false)
       }
