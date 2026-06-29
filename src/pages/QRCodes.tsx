@@ -53,6 +53,7 @@ export default function QRCodes() {
       setLoading(true)
 
       const { data: userData } = await supabase.auth.getUser()
+      let restauranteId: number | null = null
       if (userData?.user) {
         const { data: usuario } = await supabase
           .from('usuarios')
@@ -60,16 +61,24 @@ export default function QRCodes() {
           .eq('id', userData.user.id)
           .single()
 
-        if (usuario?.restaurante_id) {
+        restauranteId = usuario?.restaurante_id ?? null
+
+        if (restauranteId) {
           const { data: config } = await supabase
             .from('config_restaurantes')
             .select('nome_restaurante')
-            .eq('id', usuario.restaurante_id)
+            .eq('id', restauranteId)
             .single()
           if (config?.nome_restaurante) {
             setRestaurantName(config.nome_restaurante)
           }
         }
+      }
+
+      // Sem restaurante vinculado: não há QR Code a gerar — encerra sem erro
+      if (!restauranteId) {
+        setLoading(false)
+        return
       }
 
       const res = await supabase.functions.invoke('gerenciar-qr-code', {
@@ -218,6 +227,28 @@ export default function QRCodes() {
     return (
       <div className="flex h-full w-full items-center justify-center p-8">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!qrData) {
+    return (
+      <div className="flex-1 space-y-6 p-8 pt-6">
+        <div className="flex flex-col space-y-2">
+          <h2 className="text-3xl font-bold tracking-tight">QR Code e Materiais</h2>
+          <p className="text-muted-foreground">
+            Personalize o visual do seu QR Code e baixe os materiais para impressão.
+          </p>
+        </div>
+        <div className="flex flex-col items-center justify-center py-20 text-center bg-slate-50/50 rounded-xl border border-dashed border-border/60">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 mb-5">
+            <QrCode className="h-8 w-8 text-[#1D4ED8]" />
+          </div>
+          <h3 className="text-lg font-semibold text-foreground mb-1">QR Code ainda não disponível</h3>
+          <p className="text-sm text-muted-foreground max-w-md">
+            Conclua a configuração do seu restaurante para gerar o QR Code de coleta de feedbacks.
+          </p>
+        </div>
       </div>
     )
   }

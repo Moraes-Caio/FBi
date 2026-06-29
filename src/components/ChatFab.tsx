@@ -9,7 +9,7 @@ import {
   SheetTrigger,
   SheetDescription,
 } from '@/components/ui/sheet'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   Dialog,
   DialogContent,
@@ -25,6 +25,8 @@ import { FormattedMessage } from '@/lib/chat-utils'
 import { useChat } from '@/hooks/use-chat'
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/use-auth'
+import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
+import { getIniciais } from '@/lib/iniciais'
 import { useToast } from '@/hooks/use-toast'
 
 const SUGGESTIONS = [
@@ -35,6 +37,8 @@ const SUGGESTIONS = [
 
 export function ChatFab() {
   const { user } = useAuth()
+  const { mascote } = useRestauranteConfig()
+  const mascoteNome = mascote.nome
   const { toast } = useToast()
   const { messages, loading, sessaoId, enviar, carregarHistorico, detectarIntencao } =
     useChat('global')
@@ -190,8 +194,7 @@ export function ChatFab() {
       ? [
           {
             role: 'assistant',
-            content:
-              'Olá! Sou o Chef Pepê, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?',
+            content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`,
           },
         ]
       : messages.map((m) => ({ role: m.role, content: m.text }))
@@ -211,14 +214,12 @@ export function ChatFab() {
           <SheetHeader className="p-4 border-b bg-white text-foreground">
             <SheetTitle className="flex items-center gap-3 text-lg font-semibold">
               <Avatar className="h-10 w-10 border border-gray-100 shadow-sm">
-                <AvatarImage
-                  src="https://img.usecurling.com/p/100/100?q=chef%20mascot%203d%20illustration&color=blue"
-                  alt="Chef Pepê"
-                />
-                <AvatarFallback>CP</AvatarFallback>
+                <AvatarFallback className="bg-primary/10 text-primary font-bold">
+                  {getIniciais(mascoteNome, 1)}
+                </AvatarFallback>
               </Avatar>
               <div className="flex flex-col items-start">
-                <span className="font-bold text-gray-900">Chef Pepê</span>
+                <span className="font-bold text-gray-900">{mascoteNome}</span>
                 <span className="text-xs text-green-600 font-medium flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Online
                 </span>
@@ -326,7 +327,7 @@ export function ChatFab() {
 
             <div className="flex items-end gap-2 relative">
               <Textarea
-                placeholder="Pergunte ao Chef Pepê..."
+                placeholder={`Pergunte ao ${mascoteNome}...`}
                 className="min-h-[60px] max-h-[120px] resize-none pr-12 rounded-xl text-sm"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}

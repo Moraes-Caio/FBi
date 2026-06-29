@@ -37,6 +37,8 @@ async function processarRestaurante(
   const max_importantes = config_insights.max_importantes || 5
   const max_observacoes = config_insights.max_observacoes || 3
 
+  const mascoteNome = (config.mascote_config as any)?.nome || 'Chef Pepê'
+
   const ultimaAnalise = config.ultima_analise_insights
     ? new Date(config.ultima_analise_insights)
     : null
@@ -93,7 +95,7 @@ async function processarRestaurante(
     }
   }
 
-  const prompt = `Você é o "Chef Pepê", um assistente de inteligência artificial analisando feedbacks de clientes para um restaurante.
+  const prompt = `Você é o "${mascoteNome}", um assistente de inteligência artificial analisando feedbacks de clientes para um restaurante.
 Sua missão é gerar insights operacionais estruturados em JSON baseados apenas nestes feedbacks recentes.
 
 Regras rígidas de classificação:

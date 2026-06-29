@@ -26,10 +26,13 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/hooks/use-toast'
 import { supabase } from '@/lib/supabase/client'
-import { MASCOT_NAMES, MASCOT_PERSONALITIES, MASCOT_AVATARS } from '@/lib/mascote-config'
+import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
+import { MASCOT_NAMES, MASCOT_PERSONALITIES } from '@/lib/mascote-config'
+import { getIniciais } from '@/lib/iniciais'
 
 export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
   const { toast } = useToast()
+  const { refetch: refetchConfig } = useRestauranteConfig()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -83,13 +86,12 @@ export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
         variant: 'destructive',
       })
     } else {
+      refetchConfig() // propaga nome/avatar do mascote e configs para todo o site
       toast({ title: 'Sucesso', description: 'Configurações de IA e mascote atualizadas.' })
     }
   }
 
   if (loading) return <Skeleton className="h-96 w-full animate-fade-in" />
-
-  const avatarUrl = MASCOT_AVATARS[mascoteConfig.nome] || MASCOT_AVATARS['Chef Pepê']
 
   return (
     <Card className="shadow-subtle animate-fade-in-up">
@@ -104,8 +106,10 @@ export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
         <div className="flex flex-col md:flex-row gap-8 items-start">
           <div className="space-y-3 flex-shrink-0">
             <Label>Pré-visualização</Label>
-            <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-muted/50 shadow-sm bg-muted">
-              <img src={avatarUrl} alt="Avatar do Mascote" className="w-full h-full object-cover" />
+            <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-muted/50 shadow-sm bg-primary/10 flex items-center justify-center">
+              <span className="text-5xl font-bold text-primary">
+                {getIniciais(mascoteConfig.nome, 1)}
+              </span>
             </div>
           </div>
           <div className="flex-1 space-y-5 w-full">

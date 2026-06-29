@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase/client'
 import { criarAcao } from '@/lib/queries/acoes'
 import { useAuth } from '@/hooks/use-auth'
+import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
 import { useToast } from '@/hooks/use-toast'
 
 // Opções de gatilho da geração automática: de 5 em 5, mínimo 5, máximo 15
@@ -51,6 +52,7 @@ export default function Insights() {
   const [savingConfig, setSavingConfig] = useState(false)
 
   const { usuario } = useAuth()
+  const { mascote, configInsights, refetch: refetchConfig } = useRestauranteConfig()
   const { toast } = useToast()
 
   const fetchInsights = async () => {
@@ -80,25 +82,13 @@ export default function Insights() {
     }
   }
 
-  const fetchConfigInsights = async () => {
-    if (!usuario?.restaurante_id) return
-    try {
-      const { data, error } = await supabase
-        .from('config_restaurantes')
-        .select('config_insights')
-        .eq('id', usuario.restaurante_id)
-        .single()
-
-      if (error) throw error
-
-      const atual = (data?.config_insights as any)?.feedbacks_por_analise
-      const valor = FEEDBACK_OPTIONS.includes(atual) ? atual : 5
-      setFeedbacksPorAnalise(valor)
-      setSavedFeedbacksPorAnalise(valor)
-    } catch {
-      // Mantém o padrão (5) se não conseguir carregar
-    }
-  }
+  // Sincroniza o valor da engrenagem com a fonte única de config (contexto)
+  useEffect(() => {
+    const atual = (configInsights as any)?.feedbacks_por_analise
+    const valor = FEEDBACK_OPTIONS.includes(atual) ? atual : 5
+    setFeedbacksPorAnalise(valor)
+    setSavedFeedbacksPorAnalise(valor)
+  }, [configInsights])
 
   const handleSalvarConfig = async () => {
     if (!usuario?.restaurante_id) return
@@ -124,6 +114,7 @@ export default function Insights() {
 
       setSavedFeedbacksPorAnalise(valor)
       setConfigOpen(false)
+      refetchConfig() // propaga para o restante do site (MascotTab etc.)
       toast({
         title: 'Configuração salva',
         description: `A análise automática será disparada a cada ${valor} novos feedbacks.`,
@@ -136,11 +127,16 @@ export default function Insights() {
   }
 
   useEffect(() => {
+    if (usuario === undefined) return // auth ainda carregando
+
     if (usuario?.restaurante_id) {
       fetchInsights()
-      fetchConfigInsights()
+    } else {
+      // Sem restaurante vinculado: nada a buscar, encerra o loading
+      setInsights([])
+      setLoading(false)
     }
-  }, [usuario?.restaurante_id])
+  }, [usuario])
 
   const handleGerarInsights = async () => {
     setGenerating(true)
@@ -303,7 +299,7 @@ export default function Insights() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Gerar insights agora?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  O Chef Pepê analisará todos os feedbacks recentes e gerará novos insights
+                  O {mascote.nome} analisará todos os feedbacks recentes e gerará novos insights
                   operacionais. Os insights anteriores serão substituídos.
                 </AlertDialogDescription>
               </AlertDialogHeader>

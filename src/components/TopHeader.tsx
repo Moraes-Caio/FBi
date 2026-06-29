@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
 import { useUserProfile } from '@/hooks/use-user-profile'
 import { supabase } from '@/lib/supabase/client'
+import { getIniciais } from '@/lib/iniciais'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import {
@@ -117,15 +118,11 @@ export function TopHeader() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Avatar className="h-9 w-9 border border-border cursor-pointer hover:opacity-80 transition-opacity ring-offset-2 hover:ring-2 ring-primary/20">
-                <AvatarImage
-                  src={
-                    profile?.avatar_url ||
-                    `https://img.usecurling.com/ppl/thumbnail?seed=${usuario?.id}`
-                  }
-                  alt={usuario?.nome || 'Usuário'}
-                />
-                <AvatarFallback>
-                  {usuario?.nome?.substring(0, 2).toUpperCase() || 'US'}
+                {profile?.avatar_url && (
+                  <AvatarImage src={profile.avatar_url} alt={usuario?.nome || 'Usuário'} />
+                )}
+                <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
+                  {getIniciais(usuario?.nome, 2)}
                 </AvatarFallback>
               </Avatar>
             </DropdownMenuTrigger>
@@ -137,14 +134,11 @@ export function TopHeader() {
               <div className="p-3 bg-secondary/20">
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10 border border-border/50 shadow-sm">
-                    <AvatarImage
-                      src={
-                        profile?.avatar_url ||
-                        `https://img.usecurling.com/ppl/thumbnail?seed=${usuario?.id}`
-                      }
-                    />
-                    <AvatarFallback>
-                      {usuario?.nome?.substring(0, 2).toUpperCase() || 'US'}
+                    {profile?.avatar_url && (
+                      <AvatarImage src={profile.avatar_url} alt={usuario?.nome || 'Usuário'} />
+                    )}
+                    <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
+                      {getIniciais(usuario?.nome, 2)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col space-y-0.5 overflow-hidden">

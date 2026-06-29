@@ -3,17 +3,19 @@ import { Card, CardContent } from '@/components/ui/card'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/use-auth'
+import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
 import { useToast } from '@/hooks/use-toast'
 
 export function AiBanner() {
   const { usuario } = useAuth()
+  const { mascote } = useRestauranteConfig()
   const { toast } = useToast()
   const [textoBanner, setTextoBanner] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
   const restauranteId = usuario?.restaurante_id ?? null
-  const defaultText = 'Continue coletando feedbacks para receber insights do Chef Pepê.'
+  const defaultText = `Continue coletando feedbacks para receber insights do ${mascote.nome}.`
 
   const carregarBanner = async () => {
     if (!restauranteId) return

@@ -1,6 +1,7 @@
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { getIniciais } from '@/lib/iniciais'
 import { Progress } from '@/components/ui/progress'
-import { CheckCircle2, User, MessageCircleQuestion, ArrowRight, RotateCcw } from 'lucide-react'
+import { CheckCircle2, MessageCircleQuestion, ArrowRight, RotateCcw } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -136,9 +137,8 @@ export function TaskCard({ task, onClick, onProgress, onUndo, canUndo, isOverlay
       <div className="flex items-center justify-between mt-auto pt-1">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Avatar className="w-6 h-6 border border-border">
-            <AvatarImage src={`https://img.usecurling.com/ppl/thumbnail?seed=${task.id}`} />
-            <AvatarFallback>
-              <User className="w-3 h-3" />
+            <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-semibold">
+              {getIniciais(task.responsible || 'Equipe', 2)}
             </AvatarFallback>
           </Avatar>
           <span className="truncate max-w-[100px] font-medium">{task.responsible || 'Equipe'}</span>

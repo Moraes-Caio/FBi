@@ -46,7 +46,10 @@ export const getPeriodDates = (period: PeriodInfo) => {
   return { now, currentStart, previousStart, days }
 }
 
-const getFeedbacksForPeriod = async (restauranteId: number, period: PeriodInfo) => {
+const getFeedbacksForPeriod = async (restauranteId: number | null, period: PeriodInfo) => {
+  // Conta sem restaurante vinculado (onboarding incompleto): nada a buscar
+  if (!restauranteId) return []
+
   const { previousStart } = getPeriodDates(period)
   const { data, error } = await supabase
     .from('feedbacks_restaurante')
@@ -59,7 +62,7 @@ const getFeedbacksForPeriod = async (restauranteId: number, period: PeriodInfo) 
   return data || []
 }
 
-export const buscarKpis = async (restauranteId: number, periodo: PeriodInfo) => {
+export const buscarKpis = async (restauranteId: number | null, periodo: PeriodInfo) => {
   const feedbacks = await getFeedbacksForPeriod(restauranteId, periodo)
   const { currentStart } = getPeriodDates(periodo)
 
@@ -147,7 +150,7 @@ export const buscarKpis = async (restauranteId: number, periodo: PeriodInfo) => 
   }
 }
 
-export const buscarTendencia = async (restauranteId: number, periodo: PeriodInfo) => {
+export const buscarTendencia = async (restauranteId: number | null, periodo: PeriodInfo) => {
   const feedbacks = await getFeedbacksForPeriod(restauranteId, periodo)
   const { now, currentStart, days } = getPeriodDates(periodo)
   const currentFeedbacks = feedbacks.filter((f) => isAfter(parseISO(f.created_at), currentStart))
@@ -185,7 +188,7 @@ export const buscarTendencia = async (restauranteId: number, periodo: PeriodInfo
   }))
 }
 
-export const buscarCategorias = async (restauranteId: number, periodo: PeriodInfo) => {
+export const buscarCategorias = async (restauranteId: number | null, periodo: PeriodInfo) => {
   const feedbacks = await getFeedbacksForPeriod(restauranteId, periodo)
   const { currentStart } = getPeriodDates(periodo)
 
@@ -232,9 +235,11 @@ export const buscarCategorias = async (restauranteId: number, periodo: PeriodInf
 }
 
 export const buscarUltimosFeedbacks = async (
-  restauranteId: number,
+  restauranteId: number | null,
   limit = 5,
 ): Promise<FeedbackItem[]> => {
+  if (!restauranteId) return []
+
   const { data, error } = await supabase
     .from('feedbacks_restaurante')
     .select('*')

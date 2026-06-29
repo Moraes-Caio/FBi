@@ -455,7 +455,7 @@ export function TaskBoard({ refreshTrigger = 0 }: TaskBoardProps) {
     { title: 'CONCLUÍDO', status: 'CONCLUIDO' },
   ]
 
-  if (loading || !usuario || !usuario.restaurante_id) {
+  if (loading) {
     return (
       <div className="flex flex-col md:flex-row gap-6 h-full min-h-[600px] overflow-x-auto pb-4">
         {[1, 2, 3].map((i) => (
@@ -493,6 +493,36 @@ export function TaskBoard({ refreshTrigger = 0 }: TaskBoardProps) {
             </div>
           </div>
         ))}
+      </div>
+    )
+  }
+
+  if (tasks.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center bg-slate-50/50 rounded-xl border border-dashed border-border/60 min-h-[400px]">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 mb-5">
+          <Plus className="h-8 w-8 text-[#1D4ED8]" />
+        </div>
+        <h3 className="text-lg font-semibold text-foreground mb-1">Nenhuma ação no momento</h3>
+        <p className="text-sm text-muted-foreground max-w-md mb-6">
+          As ações aparecem aqui quando você aprova sugestões da IA ou cria uma tarefa manualmente.
+        </p>
+        {usuario?.restaurante_id && (
+          <Button onClick={() => handleOpenModal('PENDENTE')} className="bg-[#1D4ED8] hover:bg-blue-700">
+            <Plus className="w-4 h-4 mr-2" />
+            Adicionar tarefa
+          </Button>
+        )}
+
+        {modalOpen && (
+          <TaskModal
+            open={modalOpen}
+            onOpenChange={setModalOpen}
+            task={null as any}
+            onSave={handleSaveTask}
+            onDelete={handleDeleteTask}
+          />
+        )}
       </div>
     )
   }

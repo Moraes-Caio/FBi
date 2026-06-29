@@ -5,9 +5,7 @@ import {
   Lightbulb,
   Zap,
   FileBarChart,
-  UtensilsCrossed,
   QrCode,
-  Settings as SettingsIcon,
 } from 'lucide-react'
 import {
   Sidebar,
@@ -17,6 +15,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
+import { getIniciais } from '@/lib/iniciais'
 
 const navigation = [
   { name: 'Visão Geral', href: '/', icon: LayoutDashboard },
@@ -29,17 +29,22 @@ const navigation = [
 
 export function AppSidebar() {
   const location = useLocation()
+  const { nomeRestaurante, logoUrl } = useRestauranteConfig()
 
   return (
     <Sidebar className="border-r border-border bg-white text-sidebar-foreground">
       <SidebarHeader className="p-4 border-b border-border/50">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-            <UtensilsCrossed className="h-5 w-5" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm overflow-hidden">
+            {logoUrl ? (
+              <img src={logoUrl} alt={nomeRestaurante} className="h-full w-full object-cover" />
+            ) : (
+              <span className="text-sm font-bold">{getIniciais(nomeRestaurante, 2)}</span>
+            )}
           </div>
           <div className="flex flex-col">
             <span className="text-sm font-semibold text-foreground leading-tight">
-              Restaurante da Vila
+              {nomeRestaurante}
             </span>
             <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
               Feedback Intelligence

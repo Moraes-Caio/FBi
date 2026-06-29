@@ -3,6 +3,7 @@ import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/hooks/use-auth'
+import { RestauranteConfigProvider } from '@/hooks/use-restaurante-config'
 import Layout from './components/Layout'
 import NotFound from './pages/NotFound'
 
@@ -24,8 +25,9 @@ import { RotaProtegida } from './components/RotaProtegida'
 
 const App = () => (
   <AuthProvider>
-    <BrowserRouter future={{ v7_startTransition: false, v7_relativeSplatPath: false }}>
-      <TooltipProvider>
+    <RestauranteConfigProvider>
+      <BrowserRouter future={{ v7_startTransition: false, v7_relativeSplatPath: false }}>
+        <TooltipProvider>
         <Toaster />
         <Sonner />
         <Routes>
@@ -51,8 +53,9 @@ const App = () => (
           <Route path="/404" element={<NotFound />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
-      </TooltipProvider>
-    </BrowserRouter>
+        </TooltipProvider>
+      </BrowserRouter>
+    </RestauranteConfigProvider>
   </AuthProvider>
 )
 

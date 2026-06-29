@@ -14,10 +14,13 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/hooks/use-toast'
 import { supabase } from '@/lib/supabase/client'
+import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
+import { getIniciais } from '@/lib/iniciais'
 import { Upload, Store, MessageCircle, Link as LinkIcon } from 'lucide-react'
 
 export function RestaurantTab({ restauranteId }: { restauranteId: number | null }) {
   const { toast } = useToast()
+  const { refetch: refetchConfig } = useRestauranteConfig()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
@@ -83,6 +86,7 @@ export function RestaurantTab({ restauranteId }: { restauranteId: number | null 
         variant: 'destructive',
       })
     } else {
+      refetchConfig() // atualiza sidebar/banner imediatamente
       toast({ title: 'Sucesso', description: 'Dados do restaurante atualizados.' })
     }
   }
@@ -120,6 +124,7 @@ export function RestaurantTab({ restauranteId }: { restauranteId: number | null 
         variant: 'destructive',
       })
     } else {
+      refetchConfig() // atualiza o logo na sidebar imediatamente
       toast({ title: 'Sucesso', description: 'Logotipo atualizado com sucesso.' })
     }
 
@@ -163,9 +168,10 @@ export function RestaurantTab({ restauranteId }: { restauranteId: number | null 
                     className="w-full h-full object-contain p-2 bg-white"
                   />
                 ) : (
-                  <div className="text-center p-4">
-                    <Store className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                    <span className="text-xs text-muted-foreground">Nenhuma logo</span>
+                  <div className="flex h-full w-full items-center justify-center bg-primary/10">
+                    <span className="text-3xl font-bold text-primary">
+                      {getIniciais(formData.nome_restaurante, 2)}
+                    </span>
                   </div>
                 )}
                 {uploadingLogo && (

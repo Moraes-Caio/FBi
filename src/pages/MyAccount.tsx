@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
+import { getIniciais } from '@/lib/iniciais'
 
 export default function MyAccount() {
   const { usuario } = useAuth()
@@ -185,11 +186,9 @@ export default function MyAccount() {
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <Avatar className="h-28 w-28 border border-gray-200 shadow-sm transition-transform group-hover:scale-[1.02]">
-                    <AvatarImage
-                      src={avatarUrl || `https://img.usecurling.com/ppl/large?seed=${usuario.id}`}
-                    />
-                    <AvatarFallback className="text-3xl bg-gray-50 text-gray-400">
-                      {usuario.nome?.substring(0, 2).toUpperCase() || 'US'}
+                    {avatarUrl && <AvatarImage src={avatarUrl} alt={usuario.nome || 'Usuário'} />}
+                    <AvatarFallback className="text-3xl bg-primary/10 text-primary font-semibold">
+                      {getIniciais(usuario.nome, 2)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="absolute -bottom-2 -right-2 p-2 bg-white text-gray-600 rounded-full shadow-md border border-gray-100 hover:text-primary hover:border-primary/30 transition-colors">

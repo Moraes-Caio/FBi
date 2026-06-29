@@ -20,11 +20,12 @@ export default function Reports() {
   const [kpis, setKpis] = useState<any>(null)
 
   useEffect(() => {
-    if (!profile?.restaurante_id) return
+    if (profile === undefined) return // perfil ainda carregando
     const fetchKpis = async () => {
       setLoading(true)
       try {
-        const data = await buscarKpis(profile.restaurante_id!, period)
+        // buscarKpis trata restaurante nulo retornando zeros — não trava a página
+        const data = await buscarKpis(profile?.restaurante_id ?? null, period)
         setKpis(data)
       } catch (e) {
         console.error(e)
@@ -32,7 +33,7 @@ export default function Reports() {
       setLoading(false)
     }
     fetchKpis()
-  }, [profile?.restaurante_id, period])
+  }, [profile, period])
 
   const handlePrint = () => {
     window.print()
