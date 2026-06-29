@@ -91,6 +91,15 @@ export default {
         subtle: '0 1px 3px 0 rgba(0, 0, 0, 0.08), 0 1px 2px 0 rgba(0, 0, 0, 0.03)',
         elevation: '0 4px 20px rgba(0, 0, 0, 0.05)',
       },
+      keyframes: {
+        'pulse-soft': {
+          '0%, 100%': { boxShadow: '0 20px 48px rgba(139,92,246,0.14)' },
+          '50%': { boxShadow: '0 20px 56px rgba(139,92,246,0.24)' },
+        },
+      },
+      animation: {
+        'pulse-soft': 'pulse-soft 3.5s ease-in-out infinite',
+      },
     },
   },
   plugins: [animatePlugin, typographyPlugin, aspectRatioPlugin],

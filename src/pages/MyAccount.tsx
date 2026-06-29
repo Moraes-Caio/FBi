@@ -1,16 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, Camera, Mail, AtSign, UserIcon, Briefcase } from 'lucide-react'
+import { ChevronLeft, Camera, Mail, AtSign, UserIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { useAuth } from '@/hooks/use-auth'
 import { supabase } from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
@@ -29,7 +22,6 @@ export default function MyAccount() {
   const [formData, setFormData] = useState({
     nome: '',
     username: '',
-    cargo: '',
   })
 
   useEffect(() => {
@@ -37,7 +29,6 @@ export default function MyAccount() {
       setFormData({
         nome: usuario.nome || '',
         username: '',
-        cargo: usuario.cargo || '',
       })
 
       const fetchProfile = async () => {
@@ -129,7 +120,6 @@ export default function MyAccount() {
       .update({
         nome: formData.nome,
         username: finalUsername,
-        cargo: formData.cargo,
       } as any)
       .eq('id', usuario.id)
 
@@ -263,26 +253,6 @@ export default function MyAccount() {
                       placeholder="seu_username"
                     />
                   </div>
-                </div>
-
-                <div className="space-y-2.5">
-                  <Label htmlFor="cargo" className="text-sm font-medium flex items-center gap-2">
-                    <Briefcase className="h-4 w-4 text-gray-400" />
-                    Cargo / Função
-                  </Label>
-                  <Select
-                    value={formData.cargo}
-                    onValueChange={(v) => setFormData({ ...formData, cargo: v })}
-                  >
-                    <SelectTrigger className="max-w-md">
-                      <SelectValue placeholder="Selecione seu cargo..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="admin">Administrador</SelectItem>
-                      <SelectItem value="gerente">Gerente</SelectItem>
-                      <SelectItem value="visualizador">Visualizador</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
 
                 <div className="space-y-2.5">

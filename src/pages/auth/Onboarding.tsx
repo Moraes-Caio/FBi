@@ -52,6 +52,9 @@ export default function Onboarding() {
   const { toast } = useToast()
   const navigate = useNavigate()
 
+  // Fluxo de pagamento: restaurante já foi criado pelo n8n
+  const veiaDoPagamento = !!(usuario?.restaurante_id)
+
   const [step, setStep] = useState(1)
   const [loadingSubmit, setLoadingSubmit] = useState(false)
   const [data, setData] = useState<OnboardingData>({
@@ -71,6 +74,21 @@ export default function Onboarding() {
     }
   }, [usuario, navigate])
 
+  // Pré-carregar nome do restaurante se já existir (fluxo de pagamento)
+  useEffect(() => {
+    if (!usuario?.restaurante_id) return
+    supabase
+      .from('config_restaurantes')
+      .select('nome_restaurante')
+      .eq('id', usuario.restaurante_id)
+      .single()
+      .then(({ data: rest }) => {
+        if (rest?.nome_restaurante && rest.nome_restaurante !== 'Meu Restaurante') {
+          setData((prev) => ({ ...prev, restaurante_nome: rest.nome_restaurante }))
+        }
+      })
+  }, [usuario?.restaurante_id])
+
   const handleNext = () => {
     if (step === 1 && !data.restaurante_nome.trim()) {
       toast({
@@ -89,35 +107,55 @@ export default function Onboarding() {
 
   const handleComplete = async () => {
     if (!usuario?.id) return
-
     setLoadingSubmit(true)
+
     try {
-      const { error: rpcError } = await supabase.rpc('criar_restaurante_onboarding', {
-        p_nome_restaurante: data.restaurante_nome,
-        p_mascote_config: {
-          nome: data.ia_nome || 'Chef Pepê',
-          personalidade: data.ia_tom || 'profissional_amigavel',
-        },
-      })
+      if (veiaDoPagamento && usuario.restaurante_id) {
+        // Fluxo de pagamento: restaurante já existe, só atualiza
+        const { error: restError } = await supabase
+          .from('config_restaurantes')
+          .update({
+            nome_restaurante: data.restaurante_nome,
+            mascote_config: {
+              nome: data.ia_nome || 'Chef Pepê',
+              personalidade: data.ia_tom || 'profissional_amigavel',
+            },
+          } as any)
+          .eq('id', usuario.restaurante_id)
 
-      if (rpcError) throw rpcError
+        if (restError) throw restError
 
-      await supabase
-        .from('usuarios')
-        .update({ configuracoes: data as any })
-        .eq('id', usuario.id)
+        const { error: userError } = await supabase
+          .from('usuarios')
+          .update({ onboarding_completo: true, configuracoes: data as any })
+          .eq('id', usuario.id)
 
-      toast({
-        title: 'Tudo pronto!',
-        description: 'Seu ambiente foi configurado com sucesso.',
-      })
+        if (userError) throw userError
+      } else {
+        // Fluxo de cadastro manual: cria o restaurante do zero
+        const { error: rpcError } = await supabase.rpc('criar_restaurante_onboarding', {
+          p_nome_restaurante: data.restaurante_nome,
+          p_mascote_config: {
+            nome: data.ia_nome || 'Chef Pepê',
+            personalidade: data.ia_tom || 'profissional_amigavel',
+          },
+        })
 
+        if (rpcError) throw rpcError
+
+        await supabase
+          .from('usuarios')
+          .update({ configuracoes: data as any })
+          .eq('id', usuario.id)
+      }
+
+      toast({ title: 'Tudo pronto!', description: 'Seu ambiente foi configurado com sucesso.' })
       window.location.href = '/'
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao salvar onboarding:', error)
       toast({
         title: 'Erro',
-        description: 'Não foi possível salvar as configurações. Tente novamente.',
+        description: error.message || 'Não foi possível salvar as configurações. Tente novamente.',
         variant: 'destructive',
       })
     } finally {

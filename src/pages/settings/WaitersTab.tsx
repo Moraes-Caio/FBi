@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
@@ -12,6 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Trash2, Plus, Users, CheckCircle, XCircle } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
@@ -27,11 +29,16 @@ export function WaitersTab({ restauranteId }: { restauranteId: number | null }) 
   const { toast } = useToast()
   const [waiters, setWaiters] = useState<Garcom[]>([])
   const [newWaiter, setNewWaiter] = useState('')
+  const [bulkText, setBulkText] = useState('')
   const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (!restauranteId) return
+    if (!restauranteId) {
+      setLoading(false)
+      return
+    }
     const fetchWaiters = async () => {
       const { data } = await supabase
         .from('garcons')
@@ -45,8 +52,13 @@ export function WaitersTab({ restauranteId }: { restauranteId: number | null }) 
     fetchWaiters()
   }, [restauranteId])
 
-  const handleAdd = async () => {
-    if (!newWaiter.trim() || !restauranteId) return
+  const handleAddSingle = async () => {
+    if (!newWaiter.trim()) return
+    if (!restauranteId) {
+      toast({ title: 'Erro', description: 'Restaurante não identificado. Recarregue a página.', variant: 'destructive' })
+      return
+    }
+    setSaving(true)
 
     const { data, error } = await supabase
       .from('garcons')
@@ -54,50 +66,69 @@ export function WaitersTab({ restauranteId }: { restauranteId: number | null }) 
       .select('id, nome_garcon, ativo')
       .single()
 
+    setSaving(false)
     if (error) {
-      toast({
-        title: 'Erro',
-        description: 'Não foi possível adicionar o garçom.',
-        variant: 'destructive',
-      })
+      toast({ title: 'Erro ao adicionar', description: error.message, variant: 'destructive' })
       return
     }
-
-    if (data) setWaiters([...waiters, data])
+    if (data) setWaiters((prev) => [...prev, data].sort((a, b) => a.nome_garcon.localeCompare(b.nome_garcon)))
     setNewWaiter('')
     setIsOpen(false)
     toast({ title: 'Sucesso', description: 'Garçom adicionado.' })
   }
 
-  const handleToggleStatus = async (id: number, currentStatus: boolean) => {
-    const { error } = await supabase.from('garcons').update({ ativo: !currentStatus }).eq('id', id)
-
-    if (error) {
-      toast({
-        title: 'Erro',
-        description: 'Não foi possível alterar o status.',
-        variant: 'destructive',
-      })
+  const handleAddBulk = async () => {
+    if (!bulkText.trim()) return
+    if (!restauranteId) {
+      toast({ title: 'Erro', description: 'Restaurante não identificado. Recarregue a página.', variant: 'destructive' })
       return
     }
+    const nomes = bulkText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
 
+    if (nomes.length === 0) return
+    setSaving(true)
+
+    const inserts = nomes.map((nome_garcon) => ({
+      nome_garcon,
+      restaurante_id: restauranteId,
+      ativo: true,
+    }))
+    const { data, error } = await supabase.from('garcons').insert(inserts).select('id, nome_garcon, ativo')
+
+    setSaving(false)
+    if (error) {
+      toast({ title: 'Erro ao adicionar', description: error.message, variant: 'destructive' })
+      return
+    }
+    if (data) {
+      setWaiters((prev) =>
+        [...prev, ...data].sort((a, b) => a.nome_garcon.localeCompare(b.nome_garcon)),
+      )
+    }
+    setBulkText('')
+    setIsOpen(false)
+    toast({ title: 'Sucesso', description: `${nomes.length} garçom(ns) adicionado(s).` })
+  }
+
+  const handleToggleStatus = async (id: number, currentStatus: boolean) => {
+    const { error } = await supabase.from('garcons').update({ ativo: !currentStatus }).eq('id', id)
+    if (error) {
+      toast({ title: 'Erro', description: 'Não foi possível alterar o status.', variant: 'destructive' })
+      return
+    }
     setWaiters(waiters.map((w) => (w.id === id ? { ...w, ativo: !currentStatus } : w)))
   }
 
   const handleRemove = async (id: number) => {
-    if (!confirm('Deseja realmente remover este garçom?')) return
-
+    if (!confirm('Deseja remover este garçom?')) return
     const { error } = await supabase.from('garcons').delete().eq('id', id)
-
     if (error) {
-      toast({
-        title: 'Erro',
-        description: 'Não foi possível remover.',
-        variant: 'destructive',
-      })
+      toast({ title: 'Erro', description: 'Não foi possível remover.', variant: 'destructive' })
       return
     }
-
     setWaiters(waiters.filter((w) => w.id !== id))
     toast({ title: 'Removido', description: 'Garçom removido com sucesso.' })
   }
@@ -108,12 +139,12 @@ export function WaitersTab({ restauranteId }: { restauranteId: number | null }) 
     <Card className="shadow-subtle animate-fade-in-up">
       <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <CardTitle>Garçons / Atendentes</CardTitle>
+          <CardTitle>Garçons</CardTitle>
           <CardDescription>
-            Gerencie os membros da equipe de atendimento para acompanhar avaliações por atendente.
+            Gerencie os garçons para acompanhar avaliações por atendente.
           </CardDescription>
         </div>
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+        <Dialog open={isOpen} onOpenChange={(o) => { setIsOpen(o); setNewWaiter(''); setBulkText('') }}>
           <DialogTrigger asChild>
             <Button size="sm" className="w-full sm:w-auto">
               <Plus className="w-4 h-4 mr-2" />
@@ -122,29 +153,57 @@ export function WaitersTab({ restauranteId }: { restauranteId: number | null }) 
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Novo Garçom</DialogTitle>
-              <DialogDescription>Adicione um novo atendente ao sistema.</DialogDescription>
+              <DialogTitle>Adicionar Garçons</DialogTitle>
+              <DialogDescription>Adicione um garçom individual ou vários de uma vez.</DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="waiter-name">Nome do Atendente</Label>
-                <Input
-                  id="waiter-name"
-                  value={newWaiter}
-                  onChange={(e) => setNewWaiter(e.target.value)}
-                  placeholder="Ex: João Silva"
-                  autoFocus
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsOpen(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={handleAdd} disabled={!newWaiter.trim()}>
-                Salvar
-              </Button>
-            </DialogFooter>
+            <Tabs defaultValue="individual" className="mt-2">
+              <TabsList className="w-full">
+                <TabsTrigger value="individual" className="flex-1">Individual</TabsTrigger>
+                <TabsTrigger value="varios" className="flex-1">Vários de uma vez</TabsTrigger>
+              </TabsList>
+              <TabsContent value="individual" className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="waiter-name">Nome do Garçom</Label>
+                  <Input
+                    id="waiter-name"
+                    value={newWaiter}
+                    onChange={(e) => setNewWaiter(e.target.value)}
+                    placeholder="Ex: João Silva"
+                    autoFocus
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddSingle()}
+                  />
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsOpen(false)}>Cancelar</Button>
+                  <Button onClick={handleAddSingle} disabled={!newWaiter.trim() || saving}>
+                    {saving ? 'Salvando...' : 'Adicionar'}
+                  </Button>
+                </DialogFooter>
+              </TabsContent>
+              <TabsContent value="varios" className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="bulk-waiters">Um garçom por linha</Label>
+                  <Textarea
+                    id="bulk-waiters"
+                    value={bulkText}
+                    onChange={(e) => setBulkText(e.target.value)}
+                    placeholder={"João Silva\nMaria Oliveira\nCarlos Santos"}
+                    rows={7}
+                    className="resize-none"
+                    autoFocus
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {bulkText.split('\n').filter((l) => l.trim()).length} garçom(ns) detectado(s)
+                  </p>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsOpen(false)}>Cancelar</Button>
+                  <Button onClick={handleAddBulk} disabled={!bulkText.trim() || saving}>
+                    {saving ? 'Salvando...' : 'Adicionar todos'}
+                  </Button>
+                </DialogFooter>
+              </TabsContent>
+            </Tabs>
           </DialogContent>
         </Dialog>
       </CardHeader>
@@ -163,9 +222,7 @@ export function WaitersTab({ restauranteId }: { restauranteId: number | null }) 
                 </div>
                 <div>
                   <span className="font-medium text-sm block">{w.nome_garcon}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {w.ativo ? 'Ativo' : 'Inativo'}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{w.ativo ? 'Ativo' : 'Inativo'}</span>
                 </div>
               </div>
               <div className="flex items-center gap-1">

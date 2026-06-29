@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,77 +17,93 @@ import {
   CardTitle,
   CardFooter,
 } from '@/components/ui/card'
-import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
-} from '@/components/ui/accordion'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/hooks/use-toast'
 import { supabase } from '@/lib/supabase/client'
 import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
-import { MASCOT_NAMES, MASCOT_PERSONALITIES } from '@/lib/mascote-config'
-import { getIniciais } from '@/lib/iniciais'
+import { ASSISTANT_PERSONALITIES } from '@/lib/mascote-config'
+import { Bot, Upload, X } from 'lucide-react'
 
 export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
   const { toast } = useToast()
   const { refetch: refetchConfig } = useRestauranteConfig()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [uploadingFoto, setUploadingFoto] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [mascoteConfig, setMascoteConfig] = useState({
-    nome: 'Chef Pepê',
-    personalidade: 'profissional_amigavel',
-  })
-
-  const [configInsights, setConfigInsights] = useState({
-    feedbacks_por_analise: 10,
-    horas_entre_analises: 24,
-    max_importantes: 5,
-    max_observacoes: 3,
-    max_sugestoes_acoes_por_ciclo: 3,
+  const [assistente, setAssistente] = useState({
+    nome: '',
+    personalidade: 'direto_objetivo',
+    foto_url: '',
   })
 
   useEffect(() => {
-    if (!restauranteId) return
+    if (!restauranteId) {
+      setLoading(false)
+      return
+    }
     const fetchData = async () => {
       const { data } = await supabase
         .from('config_restaurantes')
-        .select('mascote_config, config_insights')
+        .select('mascote_config')
         .eq('id', restauranteId)
         .single()
 
-      if (data) {
-        if (data.mascote_config) setMascoteConfig(data.mascote_config as any)
-        if (data.config_insights) setConfigInsights(data.config_insights as any)
+      if (data?.mascote_config) {
+        const cfg = data.mascote_config as any
+        setAssistente({
+          nome: cfg.nome || '',
+          personalidade: cfg.personalidade || 'direto_objetivo',
+          foto_url: cfg.foto_url || '',
+        })
       }
       setLoading(false)
     }
     fetchData()
   }, [restauranteId])
 
+  const handleUploadFoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files || event.target.files.length === 0 || !restauranteId) return
+    const file = event.target.files[0]
+    const fileExt = file.name.split('.').pop()
+    const filePath = `assistente-${restauranteId}-${Date.now()}.${fileExt}`
+
+    setUploadingFoto(true)
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(filePath, file, { upsert: true })
+
+    if (uploadError) {
+      toast({ title: 'Erro no upload', description: uploadError.message, variant: 'destructive' })
+      setUploadingFoto(false)
+      return
+    }
+
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath)
+    setAssistente((prev) => ({ ...prev, foto_url: publicUrl }))
+    setUploadingFoto(false)
+    toast({ title: 'Foto enviada', description: 'Salve as alterações para confirmar.' })
+  }
+
+  const handleRemoveFoto = () => {
+    setAssistente((prev) => ({ ...prev, foto_url: '' }))
+  }
+
   const handleSave = async () => {
     if (!restauranteId) return
     setSaving(true)
     const { error } = await supabase
       .from('config_restaurantes')
-      .update({
-        mascote_config: mascoteConfig,
-        config_insights: configInsights,
-      })
+      .update({ mascote_config: assistente } as any)
       .eq('id', restauranteId)
 
     setSaving(false)
     if (error) {
-      toast({
-        title: 'Erro',
-        description: 'Não foi possível salvar as configurações da IA.',
-        variant: 'destructive',
-      })
+      toast({ title: 'Erro', description: 'Não foi possível salvar.', variant: 'destructive' })
     } else {
-      refetchConfig() // propaga nome/avatar do mascote e configs para todo o site
-      toast({ title: 'Sucesso', description: 'Configurações de IA e mascote atualizadas.' })
+      refetchConfig()
+      toast({ title: 'Sucesso', description: 'Configurações do assistente atualizadas.' })
     }
   }
 
@@ -96,147 +112,109 @@ export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
   return (
     <Card className="shadow-subtle animate-fade-in-up">
       <CardHeader>
-        <CardTitle>Mascote e IA</CardTitle>
+        <CardTitle>Assistente de IA</CardTitle>
         <CardDescription>
-          Personalize a identidade do seu assistente virtual e as regras de análise da inteligência
-          artificial.
+          Configure a identidade e personalidade do assistente virtual que analisa os feedbacks do
+          seu restaurante.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="flex flex-col md:flex-row gap-8 items-start">
-          <div className="space-y-3 flex-shrink-0">
-            <Label>Pré-visualização</Label>
-            <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-muted/50 shadow-sm bg-primary/10 flex items-center justify-center">
-              <span className="text-5xl font-bold text-primary">
-                {getIniciais(mascoteConfig.nome, 1)}
-              </span>
+      <CardContent className="space-y-8">
+        <div className="flex flex-col sm:flex-row gap-8 items-start">
+          <div className="space-y-3 shrink-0">
+            <Label>Foto do Assistente</Label>
+            <div className="relative w-28 h-28">
+              <div
+                className="w-28 h-28 rounded-full border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden cursor-pointer hover:border-primary/50 hover:bg-gray-100 transition-all group"
+                onClick={() => !uploadingFoto && fileInputRef.current?.click()}
+              >
+                {assistente.foto_url ? (
+                  <img
+                    src={assistente.foto_url}
+                    alt="Foto do assistente"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-1 text-gray-400 group-hover:text-primary transition-colors">
+                    <Bot className="w-8 h-8" />
+                    <span className="text-[10px] font-medium">Adicionar foto</span>
+                  </div>
+                )}
+                {uploadingFoto && (
+                  <div className="absolute inset-0 bg-white/80 flex items-center justify-center rounded-full">
+                    <span className="text-xs text-primary animate-pulse">Enviando...</span>
+                  </div>
+                )}
+              </div>
+              {assistente.foto_url && (
+                <button
+                  onClick={handleRemoveFoto}
+                  className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="image/png, image/jpeg, image/gif, image/webp"
+                onChange={handleUploadFoto}
+                disabled={uploadingFoto}
+              />
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-28 text-xs"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingFoto}
+            >
+              <Upload className="w-3.5 h-3.5 mr-1.5" />
+              {uploadingFoto ? 'Enviando...' : 'Fazer upload'}
+            </Button>
           </div>
+
           <div className="flex-1 space-y-5 w-full">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="mascot-name">Nome do Mascote</Label>
-                <Select
-                  value={mascoteConfig.nome}
-                  onValueChange={(v) => setMascoteConfig({ ...mascoteConfig, nome: v })}
-                >
-                  <SelectTrigger id="mascot-name">
-                    <SelectValue placeholder="Selecione o mascote" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MASCOT_NAMES.map((name) => (
-                      <SelectItem key={name} value={name}>
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="personality">Personalidade</Label>
-                <Select
-                  value={mascoteConfig.personalidade}
-                  onValueChange={(v) => setMascoteConfig({ ...mascoteConfig, personalidade: v })}
-                >
-                  <SelectTrigger id="personality">
-                    <SelectValue placeholder="Selecione..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MASCOT_PERSONALITIES.map((p) => (
-                      <SelectItem key={p.value} value={p.value}>
-                        {p.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="assistente-nome">Nome do Assistente</Label>
+              <Input
+                id="assistente-nome"
+                value={assistente.nome}
+                onChange={(e) => setAssistente({ ...assistente, nome: e.target.value })}
+                placeholder="Ex: Ana, Max, Aria..."
+                className="max-w-sm"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="assistente-personalidade">Personalidade</Label>
+              <Select
+                value={assistente.personalidade}
+                onValueChange={(v) => setAssistente({ ...assistente, personalidade: v })}
+              >
+                <SelectTrigger id="assistente-personalidade" className="max-w-sm">
+                  <SelectValue placeholder="Selecione..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {ASSISTANT_PERSONALITIES.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                {assistente.personalidade === 'direto_objetivo' &&
+                  'Respostas curtas e focadas no que o gestor precisa agir imediatamente.'}
+                {assistente.personalidade === 'detalhado_analitico' &&
+                  'Análises aprofundadas com padrões, tendências e correlações dos dados.'}
+                {assistente.personalidade === 'motivador_positivo' &&
+                  'Apresenta dados de forma construtiva, destacando oportunidades de melhoria.'}
+                {assistente.personalidade === 'formal_profissional' &&
+                  'Linguagem técnica e estruturada para comunicações executivas.'}
+              </p>
             </div>
           </div>
         </div>
-
-        <Accordion type="single" collapsible className="w-full mt-6 border rounded-lg bg-card">
-          <AccordionItem value="avancadas" className="border-b-0">
-            <AccordionTrigger className="text-sm font-medium px-4 hover:no-underline hover:bg-muted/50 rounded-lg">
-              Configurações Avançadas de IA
-            </AccordionTrigger>
-            <AccordionContent className="px-4 pb-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
-                <div className="space-y-2">
-                  <Label htmlFor="feedbacks_por_analise">Feedbacks por análise</Label>
-                  <Input
-                    id="feedbacks_por_analise"
-                    type="number"
-                    value={configInsights.feedbacks_por_analise}
-                    onChange={(e) =>
-                      setConfigInsights({
-                        ...configInsights,
-                        feedbacks_por_analise: Number(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="horas_entre_analises">Horas entre análises</Label>
-                  <Input
-                    id="horas_entre_analises"
-                    type="number"
-                    value={configInsights.horas_entre_analises}
-                    onChange={(e) =>
-                      setConfigInsights({
-                        ...configInsights,
-                        horas_entre_analises: Number(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="max_importantes">Máximo de Insights Importantes</Label>
-                  <Input
-                    id="max_importantes"
-                    type="number"
-                    value={configInsights.max_importantes}
-                    onChange={(e) =>
-                      setConfigInsights({
-                        ...configInsights,
-                        max_importantes: Number(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="max_observacoes">Máximo de Observações</Label>
-                  <Input
-                    id="max_observacoes"
-                    type="number"
-                    value={configInsights.max_observacoes}
-                    onChange={(e) =>
-                      setConfigInsights({
-                        ...configInsights,
-                        max_observacoes: Number(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2 md:max-w-[50%] md:pr-3">
-                  <Label htmlFor="max_sugestoes_acoes_por_ciclo">
-                    Máximo de Sugestões de Ações (Por Ciclo)
-                  </Label>
-                  <Input
-                    id="max_sugestoes_acoes_por_ciclo"
-                    type="number"
-                    value={configInsights.max_sugestoes_acoes_por_ciclo}
-                    onChange={(e) =>
-                      setConfigInsights({
-                        ...configInsights,
-                        max_sugestoes_acoes_por_ciclo: Number(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
       </CardContent>
       <CardFooter className="border-t bg-muted/20 px-6 py-4">
         <Button onClick={handleSave} disabled={saving}>

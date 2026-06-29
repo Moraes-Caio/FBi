@@ -1,0 +1,69 @@
+import { useState, useEffect } from 'react'
+import { useAuth } from '@/hooks/use-auth'
+import { supabase } from '@/lib/supabase/client'
+
+interface PermissoesModulo {
+  ver: boolean
+  editar: boolean
+}
+
+interface Funcao {
+  id: string
+  nome: string
+  permissoes: Record<string, PermissoesModulo>
+}
+
+interface UsePermissoesReturn {
+  podeVer: (modulo: string) => boolean
+  podeEditar: (modulo: string) => boolean
+  funcao: Funcao | null
+  carregando: boolean
+}
+
+export function usePermissoes(): UsePermissoesReturn {
+  const { usuario } = useAuth()
+  const [funcao, setFuncao] = useState<Funcao | null>(null)
+  const [carregando, setCarregando] = useState(true)
+
+  useEffect(() => {
+    const funcaoId = (usuario?.configuracoes as any)?.funcao_id
+
+    // Admin e gerente sem funcao_id têm acesso total
+    if (!funcaoId || !usuario?.restaurante_id) {
+      setCarregando(false)
+      return
+    }
+
+    const fetchFuncao = async () => {
+      const { data } = await supabase
+        .from('config_restaurantes')
+        .select('funcoes_config')
+        .eq('id', usuario.restaurante_id!)
+        .single()
+
+      if (data?.funcoes_config) {
+        const lista = data.funcoes_config as Funcao[]
+        const found = lista.find((f) => f.id === funcaoId) ?? null
+        setFuncao(found)
+      }
+      setCarregando(false)
+    }
+
+    fetchFuncao()
+  }, [usuario])
+
+  // cargo admin ou sem funcao_id = acesso total
+  const isAdmin = !usuario?.configuracoes || !(usuario.configuracoes as any).funcao_id
+
+  const podeVer = (modulo: string): boolean => {
+    if (isAdmin) return true
+    return funcao?.permissoes?.[modulo]?.ver ?? false
+  }
+
+  const podeEditar = (modulo: string): boolean => {
+    if (isAdmin) return true
+    return funcao?.permissoes?.[modulo]?.editar ?? false
+  }
+
+  return { podeVer, podeEditar, funcao, carregando }
+}
