@@ -74,16 +74,16 @@
 
 **Objetivo:** Páginas de insights e ações funcionam com dados reais.
 
-- [ ] Insights (`/insights`): lista carrega do Supabase
-- [ ] Insights: filtros por prioridade e categoria funcionam
-- [ ] Insights: verificar valores de prioridade (`URGENTE` / `IMPORTANTE` / `OBSERVACAO`)
-- [ ] Insights: botão "Gerar Insights" chama Edge Function `gerar-insights`
-- [ ] Insights: TaskModal abre e fecha corretamente
-- [ ] Ações (`/acoes`): TaskBoard carrega colunas com status reais
-- [ ] Ações: verificar valores de status (`SUGERIDA` / `PENDENTE` / `EM_ANDAMENTO` / `CONCLUIDO`)
-- [ ] Ações: drag-and-drop ou botão muda status no Supabase
-- [ ] Ações: SugestoesSidebar carrega ações `SUGERIDA`
-- [ ] Verificar trigger `trg_acoes_operacionais_perguntas` ao mudar status para `PENDENTE`
+- [x] Insights (`/insights`): lista carrega do Supabase
+- [x] Insights: filtros por prioridade e categoria funcionam
+- [x] Insights: verificar valores de prioridade (`URGENTE` / `IMPORTANTE` / `OBSERVACAO`)
+- [x] Insights: botão "Gerar Insights" chama Edge Function `gerar-insights`
+- [x] Insights: TaskModal abre e fecha corretamente
+- [x] Ações (`/acoes`): TaskBoard carrega colunas com status reais
+- [x] Ações: verificar valores de status (`SUGERIDA` / `PENDENTE` / `EM_ANDAMENTO` / `CONCLUIDO`)
+- [x] Ações: drag-and-drop ou botão muda status no Supabase
+- [x] Ações: SugestoesSidebar carrega ações `SUGERIDA`
+- [x] Verificar trigger `trg_acoes_operacionais_perguntas` ao mudar status para `PENDENTE`
 
 **Concluído quando:** Insights e ações exibem dados reais e atualizam status no banco.
 
