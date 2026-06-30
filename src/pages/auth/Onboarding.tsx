@@ -110,16 +110,23 @@ export default function Onboarding() {
     setLoadingSubmit(true)
 
     try {
+      const mascoteConfig = {
+        nome: data.ia_nome || 'Chef Pepê',
+        personalidade: data.ia_tom || 'profissional_amigavel',
+        ...(data.ia_focos.length > 0 && { focos: data.ia_focos }),
+      }
+
       if (veiaDoPagamento && usuario.restaurante_id) {
         // Fluxo de pagamento: restaurante já existe, só atualiza
         const { error: restError } = await supabase
           .from('config_restaurantes')
           .update({
             nome_restaurante: data.restaurante_nome,
-            mascote_config: {
-              nome: data.ia_nome || 'Chef Pepê',
-              personalidade: data.ia_tom || 'profissional_amigavel',
-            },
+            tipo_culinaria: data.restaurante_culinaria || null,
+            numero_mesas: data.restaurante_mesas ? parseInt(data.restaurante_mesas, 10) : null,
+            metodo_coleta_feedback: data.como_coleta_feedbacks || null,
+            frequencia_relatorios: data.frequencia_relatorios || null,
+            mascote_config: mascoteConfig,
           } as any)
           .eq('id', usuario.restaurante_id)
 
@@ -127,7 +134,7 @@ export default function Onboarding() {
 
         const { error: userError } = await supabase
           .from('usuarios')
-          .update({ onboarding_completo: true, configuracoes: data as any })
+          .update({ onboarding_completo: true })
           .eq('id', usuario.id)
 
         if (userError) throw userError
@@ -135,18 +142,29 @@ export default function Onboarding() {
         // Fluxo de cadastro manual: cria o restaurante do zero
         const { error: rpcError } = await supabase.rpc('criar_restaurante_onboarding', {
           p_nome_restaurante: data.restaurante_nome,
-          p_mascote_config: {
-            nome: data.ia_nome || 'Chef Pepê',
-            personalidade: data.ia_tom || 'profissional_amigavel',
-          },
+          p_mascote_config: mascoteConfig,
         })
 
         if (rpcError) throw rpcError
 
-        await supabase
+        // Busca o restaurante_id recém-criado para salvar os campos adicionais
+        const { data: usuarioAtualizado } = await supabase
           .from('usuarios')
-          .update({ configuracoes: data as any })
+          .select('restaurante_id')
           .eq('id', usuario.id)
+          .single()
+
+        if (usuarioAtualizado?.restaurante_id) {
+          await supabase
+            .from('config_restaurantes')
+            .update({
+              tipo_culinaria: data.restaurante_culinaria || null,
+              numero_mesas: data.restaurante_mesas ? parseInt(data.restaurante_mesas, 10) : null,
+              metodo_coleta_feedback: data.como_coleta_feedbacks || null,
+              frequencia_relatorios: data.frequencia_relatorios || null,
+            } as any)
+            .eq('id', usuarioAtualizado.restaurante_id)
+        }
       }
 
       toast({ title: 'Tudo pronto!', description: 'Seu ambiente foi configurado com sucesso.' })
