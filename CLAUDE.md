@@ -56,7 +56,6 @@ Supabase project ID: `lixrcruilisncfhfhndo`
 - **Commits em português:** `feat:`, `fix:`, `refactor:`, `chore:`
 - **Sem `any` sem justificativa** em comentário
 - **RLS sempre ativo** — nunca desabilitar
-- **`message_buffer`** — NÃO tocar (legado)
 - **`n8n_chat_histories`** — NÃO tocar (gerenciado pelo n8n)
 - **`mensagens_chat`** — NÃO tocar (chat interno, escopo separado)
 - **`OPENROUTER_API_KEY` e `SUPABASE_SERVICE_ROLE_KEY`** — nunca no client bundle
@@ -113,7 +112,7 @@ Supabase project ID: `lixrcruilisncfhfhndo`
 
 | Função | Responsabilidade |
 |---|---|
-| `webhook-n8n` | Recebe webhook do n8n/UZapi, alimenta `buffer_mensagens` |
+| `webhook-n8n` | Recebe webhook do n8n/UZapi, alimenta `message_buffer` (tabela legada — NÃO tocar) |
 | `chamar-ia` | Analisa feedback via OpenRouter → salva em `feedbacks_restaurante` |
 | `gerar-insights` | Agrega feedbacks → gera insights + ações (cron) |
 | `sugerir-acoes` | Sugere ações a partir de insights (trigger automático) |

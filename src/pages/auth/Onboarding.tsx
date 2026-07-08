@@ -112,7 +112,7 @@ export default function Onboarding() {
     try {
       const mascoteConfig = {
         nome: data.ia_nome || 'Chef Pepê',
-        personalidade: data.ia_tom || 'profissional_amigavel',
+        personalidade: data.ia_tom || 'direto_objetivo',
         ...(data.ia_focos.length > 0 && { focos: data.ia_focos }),
       }
 
@@ -358,9 +358,9 @@ export default function Onboarding() {
                     <SelectValue placeholder="Selecione o tom..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Formal">Formal</SelectItem>
-                    <SelectItem value="Casual">Casual</SelectItem>
-                    <SelectItem value="Amigável">Amigável</SelectItem>
+                    <SelectItem value="formal_profissional">Formal</SelectItem>
+                    <SelectItem value="direto_objetivo">Casual</SelectItem>
+                    <SelectItem value="motivador_positivo">Amigável</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

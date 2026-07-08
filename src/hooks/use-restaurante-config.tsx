@@ -18,7 +18,7 @@ export interface RestauranteConfig {
 
 const MASCOTE_PADRAO: MascoteConfig = {
   nome: 'Chef Pepê',
-  personalidade: 'profissional_amigavel',
+  personalidade: 'direto_objetivo',
 }
 
 const RestauranteConfigContext = createContext<RestauranteConfig | undefined>(undefined)
