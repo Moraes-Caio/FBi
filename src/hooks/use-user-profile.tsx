@@ -27,10 +27,25 @@ export function useUserProfile() {
         return
       }
 
-      const { data } = await supabase.from('usuarios').select('*').eq('id', user.id).single()
+      const { data } = await supabase
+        .from('restaurantes')
+        .select('*')
+        .eq('auth_user_id', user.id)
+        .single()
 
       if (mounted) {
-        setProfile(data)
+        setProfile(
+          data
+            ? {
+                id: user.id,
+                email: data.email,
+                nome: data.nome,
+                restaurante_id: data.id,
+                cargo: data.cargo,
+                avatar_url: data.avatar_url,
+              }
+            : null,
+        )
         setLoading(false)
       }
     }

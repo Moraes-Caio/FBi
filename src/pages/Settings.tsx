@@ -6,7 +6,6 @@ import { RestaurantTab } from './settings/RestaurantTab'
 import { MascotTab } from './settings/MascotTab'
 import { CategoriesTab } from './settings/CategoriesTab'
 import { WaitersTab } from './settings/WaitersTab'
-import { TeamTab } from './settings/TeamTab'
 import { useUserProfile } from '@/hooks/use-user-profile'
 import { cn } from '@/lib/utils'
 
@@ -75,7 +74,6 @@ export default function Settings() {
     { id: 'mascote', label: 'Assistente de IA' },
     { id: 'categorias', label: 'Categorias de Feedback' },
     { id: 'garcons', label: 'Garçons' },
-    { id: 'equipe', label: 'Equipe de Acesso' },
   ]
 
   return (
@@ -129,9 +127,6 @@ export default function Settings() {
               </section>
               <section id="garcons" className="scroll-mt-28">
                 <WaitersTab restauranteId={profile.restaurante_id} />
-              </section>
-              <section id="equipe" className="scroll-mt-28">
-                <TeamTab restauranteId={profile.restaurante_id} />
               </section>
             </div>
           </div>

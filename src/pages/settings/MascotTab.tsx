@@ -45,7 +45,7 @@ export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
     }
     const fetchData = async () => {
       const { data } = await supabase
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('mascote_config')
         .eq('id', restauranteId)
         .single()

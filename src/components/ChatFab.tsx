@@ -36,7 +36,7 @@ const SUGGESTIONS = [
 ]
 
 export function ChatFab() {
-  const { user } = useAuth()
+  const { user, usuario } = useAuth()
   const { mascote } = useRestauranteConfig()
   const mascoteNome = mascote.nome
   const { toast } = useToast()
@@ -82,12 +82,7 @@ export function ChatFab() {
 
   const fetchContexto = async () => {
     if (!user) return {}
-    const { data: userData } = await supabase
-      .from('usuarios')
-      .select('restaurante_id')
-      .eq('id', user.id)
-      .single()
-    const rId = userData?.restaurante_id
+    const rId = usuario?.restaurante_id ?? null
     const [feedbacksRes, insightsRes, configRes] = await Promise.all([
       supabase
         .from('feedbacks_restaurante')
@@ -98,7 +93,7 @@ export function ChatFab() {
         ? supabase.from('insights').select('*').eq('ativo', true).eq('restaurante_id', rId)
         : Promise.resolve({ data: [] }),
       rId
-        ? supabase.from('config_restaurantes').select('mascote_config').eq('id', rId).single()
+        ? supabase.from('restaurantes').select('mascote_config').eq('id', rId).single()
         : Promise.resolve({ data: null }),
     ])
     return {
@@ -148,13 +143,8 @@ export function ChatFab() {
 
   const handleCriarInsight = async () => {
     try {
-      const { data: ud } = await supabase
-        .from('usuarios')
-        .select('restaurante_id')
-        .eq('id', user?.id)
-        .single()
       const { error } = await supabase.from('insights').insert({
-        restaurante_id: ud?.restaurante_id,
+        restaurante_id: usuario?.restaurante_id,
         titulo: insightForm.titulo,
         descricao: insightForm.descricao,
         prioridade: insightForm.prioridade,

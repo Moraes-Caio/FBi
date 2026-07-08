@@ -36,7 +36,7 @@ export function usePermissoes(): UsePermissoesReturn {
 
     const fetchFuncao = async () => {
       const { data } = await supabase
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('funcoes_config')
         .eq('id', usuario.restaurante_id!)
         .single()

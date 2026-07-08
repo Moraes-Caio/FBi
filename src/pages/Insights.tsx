@@ -98,7 +98,7 @@ export default function Insights() {
     try {
       // Lê o jsonb atual para preservar as outras chaves
       const { data: cfg } = await supabase
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('config_insights')
         .eq('id', usuario.restaurante_id)
         .single()
@@ -106,7 +106,7 @@ export default function Insights() {
       const merged = { ...((cfg?.config_insights as any) || {}), feedbacks_por_analise: valor }
 
       const { error } = await supabase
-        .from('config_restaurantes')
+        .from('restaurantes')
         .update({ config_insights: merged })
         .eq('id', usuario.restaurante_id)
 

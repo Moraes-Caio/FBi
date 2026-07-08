@@ -55,24 +55,14 @@ export default function QRCodes() {
       const { data: userData } = await supabase.auth.getUser()
       let restauranteId: number | null = null
       if (userData?.user) {
-        const { data: usuario } = await supabase
-          .from('usuarios')
-          .select('restaurante_id')
-          .eq('id', userData.user.id)
+        const { data: config } = await supabase
+          .from('restaurantes')
+          .select('id, nome_restaurante')
+          .eq('auth_user_id', userData.user.id)
           .single()
 
-        restauranteId = usuario?.restaurante_id ?? null
-
-        if (restauranteId) {
-          const { data: config } = await supabase
-            .from('config_restaurantes')
-            .select('nome_restaurante')
-            .eq('id', restauranteId)
-            .single()
-          if (config?.nome_restaurante) {
-            setRestaurantName(config.nome_restaurante)
-          }
-        }
+        restauranteId = config?.id ?? null
+        if (config?.nome_restaurante) setRestaurantName(config.nome_restaurante)
       }
 
       // Sem restaurante vinculado: não há QR Code a gerar — encerra sem erro

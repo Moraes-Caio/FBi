@@ -53,7 +53,7 @@ export const RestauranteConfigProvider = ({ children }: { children: ReactNode })
 
     try {
       const { data, error } = await supabase
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('nome_restaurante, logo_url, mascote_config, config_insights')
         .eq('id', restauranteId)
         .single()

@@ -108,7 +108,7 @@ export function AiChatSheet({ open, onOpenChange, insight }: AiChatSheetProps) {
       const fetchContextAndGreet = async () => {
         try {
           const { data: config } = await supabase
-            .from('config_restaurantes')
+            .from('restaurantes')
             .select('mascote_config')
             .limit(1)
             .single()

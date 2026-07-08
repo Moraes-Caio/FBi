@@ -21,7 +21,7 @@ export function AiBanner() {
     if (!restauranteId) return
     try {
       const { data: config } = await supabase
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('texto_banner')
         .eq('id', restauranteId)
         .single()

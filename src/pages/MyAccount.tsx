@@ -32,7 +32,11 @@ export default function MyAccount() {
       })
 
       const fetchProfile = async () => {
-        const { data } = await supabase.from('usuarios').select('*').eq('id', usuario.id).single()
+        const { data } = await supabase
+          .from('restaurantes')
+          .select('avatar_url, username')
+          .eq('auth_user_id', usuario.id)
+          .single()
 
         if (data) {
           if (data.avatar_url) setAvatarUrl(data.avatar_url)
@@ -64,9 +68,9 @@ export default function MyAccount() {
     } = supabase.storage.from('avatars').getPublicUrl(filePath)
 
     const { error: updateError } = await supabase
-      .from('usuarios')
+      .from('restaurantes')
       .update({ avatar_url: publicUrl })
-      .eq('id', usuario.id)
+      .eq('auth_user_id', usuario.id)
 
     if (updateError) {
       toast({
@@ -84,7 +88,7 @@ export default function MyAccount() {
   const handleRemoveAvatar = async () => {
     if (!usuario?.id) return
     setUploadingAvatar(true)
-    await supabase.from('usuarios').update({ avatar_url: null }).eq('id', usuario.id)
+    await supabase.from('restaurantes').update({ avatar_url: null }).eq('auth_user_id', usuario.id)
     setAvatarUrl('')
     setUploadingAvatar(false)
     toast({ title: 'Removida', description: 'Foto de perfil removida com sucesso.' })
@@ -98,10 +102,10 @@ export default function MyAccount() {
 
     if (finalUsername) {
       const { data: existingUser } = await supabase
-        .from('usuarios')
+        .from('restaurantes')
         .select('id')
         .eq('username', finalUsername)
-        .neq('id', usuario.id)
+        .neq('auth_user_id', usuario.id)
         .maybeSingle()
 
       if (existingUser) {
@@ -116,12 +120,12 @@ export default function MyAccount() {
     }
 
     const { error } = await supabase
-      .from('usuarios')
+      .from('restaurantes')
       .update({
         nome: formData.nome,
         username: finalUsername,
       } as any)
-      .eq('id', usuario.id)
+      .eq('auth_user_id', usuario.id)
 
     setLoading(false)
 

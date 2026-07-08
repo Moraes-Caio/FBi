@@ -52,9 +52,6 @@ export default function Onboarding() {
   const { toast } = useToast()
   const navigate = useNavigate()
 
-  // Fluxo de pagamento: restaurante já foi criado pelo n8n
-  const veiaDoPagamento = !!(usuario?.restaurante_id)
-
   const [step, setStep] = useState(1)
   const [loadingSubmit, setLoadingSubmit] = useState(false)
   const [data, setData] = useState<OnboardingData>({
@@ -74,11 +71,11 @@ export default function Onboarding() {
     }
   }, [usuario, navigate])
 
-  // Pré-carregar nome do restaurante se já existir (fluxo de pagamento)
+  // Pré-carregar nome do restaurante se já existir
   useEffect(() => {
     if (!usuario?.restaurante_id) return
     supabase
-      .from('config_restaurantes')
+      .from('restaurantes')
       .select('nome_restaurante')
       .eq('id', usuario.restaurante_id)
       .single()
@@ -106,7 +103,7 @@ export default function Onboarding() {
   }
 
   const handleComplete = async () => {
-    if (!usuario?.id) return
+    if (!usuario?.restaurante_id) return
     setLoadingSubmit(true)
 
     try {
@@ -116,56 +113,20 @@ export default function Onboarding() {
         ...(data.ia_focos.length > 0 && { focos: data.ia_focos }),
       }
 
-      if (veiaDoPagamento && usuario.restaurante_id) {
-        // Fluxo de pagamento: restaurante já existe, só atualiza
-        const { error: restError } = await supabase
-          .from('config_restaurantes')
-          .update({
-            nome_restaurante: data.restaurante_nome,
-            tipo_culinaria: data.restaurante_culinaria || null,
-            numero_mesas: data.restaurante_mesas ? parseInt(data.restaurante_mesas, 10) : null,
-            metodo_coleta_feedback: data.como_coleta_feedbacks || null,
-            frequencia_relatorios: data.frequencia_relatorios || null,
-            mascote_config: mascoteConfig,
-          } as any)
-          .eq('id', usuario.restaurante_id)
+      const { error } = await supabase
+        .from('restaurantes')
+        .update({
+          nome_restaurante: data.restaurante_nome,
+          tipo_culinaria: data.restaurante_culinaria || null,
+          numero_mesas: data.restaurante_mesas ? parseInt(data.restaurante_mesas, 10) : null,
+          metodo_coleta_feedback: data.como_coleta_feedbacks || null,
+          frequencia_relatorios: data.frequencia_relatorios || null,
+          mascote_config: mascoteConfig,
+          onboarding_completo: true,
+        } as any)
+        .eq('id', usuario.restaurante_id)
 
-        if (restError) throw restError
-
-        const { error: userError } = await supabase
-          .from('usuarios')
-          .update({ onboarding_completo: true })
-          .eq('id', usuario.id)
-
-        if (userError) throw userError
-      } else {
-        // Fluxo de cadastro manual: cria o restaurante do zero
-        const { error: rpcError } = await supabase.rpc('criar_restaurante_onboarding', {
-          p_nome_restaurante: data.restaurante_nome,
-          p_mascote_config: mascoteConfig,
-        })
-
-        if (rpcError) throw rpcError
-
-        // Busca o restaurante_id recém-criado para salvar os campos adicionais
-        const { data: usuarioAtualizado } = await supabase
-          .from('usuarios')
-          .select('restaurante_id')
-          .eq('id', usuario.id)
-          .single()
-
-        if (usuarioAtualizado?.restaurante_id) {
-          await supabase
-            .from('config_restaurantes')
-            .update({
-              tipo_culinaria: data.restaurante_culinaria || null,
-              numero_mesas: data.restaurante_mesas ? parseInt(data.restaurante_mesas, 10) : null,
-              metodo_coleta_feedback: data.como_coleta_feedbacks || null,
-              frequencia_relatorios: data.frequencia_relatorios || null,
-            } as any)
-            .eq('id', usuarioAtualizado.restaurante_id)
-        }
-      }
+      if (error) throw error
 
       toast({ title: 'Tudo pronto!', description: 'Seu ambiente foi configurado com sucesso.' })
       window.location.href = '/'

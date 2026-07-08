@@ -39,7 +39,7 @@ export function RestaurantTab({ restauranteId }: { restauranteId: number | null 
     }
     const fetchData = async () => {
       const { data } = await supabase
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('*')
         .eq('id', restauranteId)
         .single()

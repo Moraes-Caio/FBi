@@ -3,13 +3,15 @@ import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase/client'
 
 export interface UsuarioDados {
-  id: string
-  email: string
+  id: string             // UUID do auth.users — usado em operações de auth
+  restaurante_id: number | null  // restaurantes.id (bigint) — usado em queries de dados
+  email: string | null
   nome: string | null
-  restaurante_id: number | null
   cargo: string | null
   onboarding_completo: boolean | null
   configuracoes?: any
+  avatar_url?: string | null
+  username?: string | null
 }
 
 interface AuthContextType {
@@ -31,6 +33,14 @@ export const useAuth = () => {
   return context
 }
 
+function mapRestauranteToUsuario(row: any, authId: string): UsuarioDados {
+  return {
+    ...row,
+    id: authId,           // auth UUID — mantido para operações de auth
+    restaurante_id: row.id, // bigint — usado em queries de dados
+  }
+}
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
@@ -38,40 +48,39 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const fetchUsuario = async (userAuth: import('@supabase/supabase-js').User) => {
+    const fetchUsuario = async (userAuth: User) => {
       const { data, error } = await supabase
-        .from('usuarios')
+        .from('restaurantes')
         .select('*')
-        .eq('id', userAuth.id)
+        .eq('auth_user_id', userAuth.id)
         .single()
 
       if (data) {
-        setUsuario(data as UsuarioDados)
+        setUsuario(mapRestauranteToUsuario(data, userAuth.id))
         setLoading(false)
         return
       }
 
-      // Usuário existe no Auth mas não tem registro em usuarios
-      // (criado direto no dashboard ou falha no cadastro)
+      // Sem restaurante — cria placeholder (novo cadastro sem trigger)
       if (error?.code === 'PGRST116') {
         const { data: novo } = await supabase
-          .from('usuarios')
+          .from('restaurantes')
           .insert({
-            id: userAuth.id,
+            auth_user_id: userAuth.id,
             email: userAuth.email || '',
             nome: null,
+            nome_restaurante: 'Meu Restaurante',
             onboarding_completo: false,
-            cargo: 'gerente',
           })
           .select('*')
           .single()
 
-        setUsuario(novo as UsuarioDados | null)
+        setUsuario(novo ? mapRestauranteToUsuario(novo, userAuth.id) : null)
         setLoading(false)
         return
       }
 
-      console.error('Erro ao buscar usuário:', error)
+      console.error('Erro ao buscar restaurante:', error)
       setLoading(false)
     }
 
@@ -110,35 +119,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: { nome },
-      },
+      options: { data: { nome } },
     })
 
     if (error) return { error }
 
     if (data.user) {
-      const { error: insertError } = await supabase.from('usuarios').insert({
-        id: data.user.id,
-        email: email,
-        nome: nome,
-        onboarding_completo: false,
-        cargo: 'gerente',
-      })
+      const { data: novo, error: insertError } = await supabase
+        .from('restaurantes')
+        .insert({
+          auth_user_id: data.user.id,
+          email,
+          nome,
+          nome_restaurante: 'Meu Restaurante',
+          onboarding_completo: false,
+        })
+        .select('*')
+        .single()
 
       if (insertError) {
-        console.error('Erro ao criar perfil na tabela usuarios:', insertError)
+        console.error('Erro ao criar restaurante:', insertError)
         return { error: insertError }
       }
 
-      const { data: userData } = await supabase
-        .from('usuarios')
-        .select('*')
-        .eq('id', data.user.id)
-        .single()
-      if (userData) {
-        setUsuario(userData as UsuarioDados)
-      }
+      if (novo) setUsuario(mapRestauranteToUsuario(novo, data.user.id))
     }
 
     return { error: null }
