@@ -77,9 +77,9 @@ export default function OnboardingMembro() {
       if (username.trim()) updates.username = username.trim()
 
       const { error: profileError } = await supabase
-        .from('usuarios')
+        .from('restaurantes')
         .update(updates as any)
-        .eq('id', usuario.id)
+        .eq('auth_user_id', usuario.id)
 
       if (profileError) throw profileError
 

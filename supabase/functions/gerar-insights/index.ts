@@ -293,12 +293,12 @@ serve(async (req: Request) => {
     }
 
     const { data: usuarioData } = await supabaseAdmin
-      .from('usuarios')
-      .select('restaurante_id')
-      .eq('id', user.id)
+      .from('restaurantes')
+      .select('id')
+      .eq('auth_user_id', user.id)
       .single()
 
-    const targetRestauranteId = usuarioData?.restaurante_id
+    const targetRestauranteId = usuarioData?.id
     if (!targetRestauranteId) {
       return new Response(
         JSON.stringify({ error: 'Restaurante não encontrado para este usuário.' }),

@@ -40,20 +40,20 @@ serve(async (req: Request) => {
 
     const userId = userData.user.id
 
-    const { data: usuario, error: usuarioErr } = await supabaseAdmin
-      .from('usuarios')
-      .select('restaurante_id')
-      .eq('id', userId)
+    const { data: restaurante, error: restauranteErr } = await supabaseAdmin
+      .from('restaurantes')
+      .select('id')
+      .eq('auth_user_id', userId)
       .single()
 
-    if (usuarioErr || !usuario?.restaurante_id) {
+    if (restauranteErr || !restaurante?.id) {
       return new Response(JSON.stringify({ error: 'User does not belong to a restaurant' }), {
         status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    const restauranteId = usuario.restaurante_id
+    const restauranteId = restaurante.id
 
     const qrRedirectBaseUrl = 'https://lixrcruilisncfhfhndo.supabase.co/functions/v1/qr-redirect'
 
