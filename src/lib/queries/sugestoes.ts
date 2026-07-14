@@ -4,6 +4,7 @@ export interface Resposta {
   id: string
   texto: string
   autor: string
+  arquivos: string[]
   created_at: string
 }
 
@@ -14,6 +15,7 @@ export interface Sugestao {
   arquivos: string[]
   status: 'aberta' | 'respondida' | 'finalizada'
   created_at: string
+  admin_leu_em: string | null
   respostas: Resposta[]
 }
 
@@ -26,8 +28,8 @@ export async function buscarSugestoes(): Promise<Sugestao[]> {
   const { data, error } = await supabase
     .from('sugestoes_plataforma')
     .select(
-      `id, texto, titulo, arquivos, status, created_at,
-       respostas_sugestoes (id, texto, autor, created_at)`,
+      `id, texto, titulo, arquivos, status, created_at, admin_leu_em,
+       respostas_sugestoes (id, texto, autor, arquivos, created_at)`,
     )
     .eq('usuario_id', user.id)
     .order('created_at', { ascending: false })
@@ -41,6 +43,7 @@ export async function buscarSugestoes(): Promise<Sugestao[]> {
     arquivos: s.arquivos ?? [],
     status: s.status,
     created_at: s.created_at,
+    admin_leu_em: s.admin_leu_em ?? null,
     respostas: (s.respostas_sugestoes ?? []).sort(
       (a: Resposta, b: Resposta) =>
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
@@ -65,6 +68,62 @@ export async function criarSugestao(
     arquivos: arquivoPaths,
   })
   if (error) throw error
+}
+
+export async function editarSugestao(
+  id: string,
+  texto: string,
+  arquivos: string[],
+): Promise<void> {
+  const { error } = await supabase
+    .from('sugestoes_plataforma')
+    .update({ texto, arquivos })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function editarResposta(
+  id: string,
+  texto: string,
+  arquivos: string[],
+): Promise<void> {
+  const { error } = await supabase
+    .from('respostas_sugestoes')
+    .update({ texto, arquivos })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function excluirResposta(id: string): Promise<void> {
+  const { error } = await supabase.from('respostas_sugestoes').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function excluirArquivosStorage(paths: string[]): Promise<void> {
+  if (paths.length === 0) return
+  const { error } = await supabase.storage.from('sugestoes-plataforma').remove(paths)
+  if (error) throw error
+}
+
+export async function responderSugestao(
+  sugestaoId: string,
+  texto: string,
+  arquivoPaths: string[],
+): Promise<void> {
+  const { error } = await supabase.from('respostas_sugestoes').insert({
+    sugestao_id: sugestaoId,
+    texto,
+    autor: 'usuario',
+    arquivos: arquivoPaths,
+  })
+  if (error) throw error
+}
+
+export async function marcarClienteLeu(sugestaoId: string): Promise<void> {
+  await supabase
+    .from('sugestoes_plataforma')
+    .update({ cliente_leu_em: new Date().toISOString() })
+    .eq('id', sugestaoId)
 }
 
 export async function excluirSugestao(id: string): Promise<void> {
@@ -94,8 +153,8 @@ export async function uploadArquivosSugestao(
 ): Promise<string[]> {
   const paths: string[] = []
   for (const file of files) {
-    const ext = file.name.split('.').pop() ?? 'bin'
-    const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}-${safeName}`
     const { error } = await supabase.storage
       .from('sugestoes-plataforma')
       .upload(path, file, { upsert: false })

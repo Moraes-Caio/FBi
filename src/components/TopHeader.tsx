@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useLocation, Link, useNavigate } from 'react-router-dom'
-import { LogOut, Settings as SettingsIcon, User as UserIcon } from 'lucide-react'
+import { LogOut, Settings as SettingsIcon, User as UserIcon, ShieldCheck } from 'lucide-react'
+import { usePlatformAdmin } from '@/hooks/use-platform-admin'
+import { buscarTotalNaoLidas } from '@/lib/queries/admin'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
@@ -40,7 +42,24 @@ export function TopHeader() {
   const { profile } = useUserProfile()
   const title = routeTitles[location.pathname] || 'Dashboard'
 
+  const { isAdmin } = usePlatformAdmin()
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
+  const [adminUnread, setAdminUnread] = useState(0)
+
+  // Busca do banco ao montar (Admin e TopHeader nunca ficam montados juntos)
+  useEffect(() => {
+    if (!isAdmin) return
+    buscarTotalNaoLidas().then(setAdminUnread).catch(() => {})
+  }, [isAdmin])
+
+  // Atualização em tempo real via evento (quando o admin marca como lido dentro de /admin)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      setAdminUnread((e as CustomEvent<{ count: number }>).detail.count)
+    }
+    window.addEventListener('fib-unread-update', handler)
+    return () => window.removeEventListener('fib-unread-update', handler)
+  }, [])
 
   const handleLogout = async () => {
     await logout()
@@ -56,6 +75,20 @@ export function TopHeader() {
         </div>
 
         <div className="flex items-center gap-4">
+          {isAdmin && (
+            <Link
+              to="/admin"
+              title="Painel Admin"
+              className="relative flex items-center justify-center h-9 w-9 rounded-full bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors border border-amber-200"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              {adminUnread > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center px-1 leading-none pointer-events-none">
+                  {adminUnread > 99 ? '99+' : adminUnread}
+                </span>
+              )}
+            </Link>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Avatar className="h-9 w-9 border border-border cursor-pointer hover:opacity-80 transition-opacity ring-offset-2 hover:ring-2 ring-primary/20">

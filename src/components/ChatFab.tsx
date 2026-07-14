@@ -34,6 +34,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { FormattedMessage } from '@/lib/chat-utils'
 import { useChat } from '@/hooks/use-chat'
@@ -93,9 +94,12 @@ interface SessaoItem {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function ChatFab() {
+  const { pathname } = useLocation()
   const { user, usuario } = useAuth()
   const { mascote } = useRestauranteConfig()
   const mascoteNome = mascote.nome
+
+  if (pathname === '/sugestoes') return null
   const { toast } = useToast()
   const { messages, loading, sessaoId, enviar, carregarHistorico, detectarIntencao, novaConversa, mudarSessao } =
     useChat('global')
