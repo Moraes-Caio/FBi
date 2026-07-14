@@ -21,6 +21,7 @@ import RecuperarSenha from './pages/auth/RecuperarSenha'
 import Onboarding from './pages/auth/Onboarding'
 import OnboardingMembro from './pages/auth/OnboardingMembro'
 import MyAccount from './pages/MyAccount'
+import Sugestoes from './pages/Sugestoes'
 import { RotaProtegida } from './components/RotaProtegida'
 import { RotaPermitida } from './components/RotaPermitida'
 
@@ -97,6 +98,7 @@ const App = () => (
                   </RotaPermitida>
                 }
               />
+              <Route path="/sugestoes" element={<Sugestoes />} />
             </Route>
           </Route>
 
