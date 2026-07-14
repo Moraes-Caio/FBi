@@ -91,7 +91,7 @@ export function TeamTab({ restauranteId }: { restauranteId: number | null }) {
     const fetch = async () => {
       const [configRes, membrosRes] = await Promise.all([
         supabase
-          .from('config_restaurantes')
+          .from('restaurantes')
           .select('funcoes_config')
           .eq('id', restauranteId)
           .single(),
@@ -119,7 +119,7 @@ export function TeamTab({ restauranteId }: { restauranteId: number | null }) {
       return false
     }
     const { error } = await supabase
-      .from('config_restaurantes')
+      .from('restaurantes')
       .update({ funcoes_config: novasFuncoes } as any)
       .eq('id', restauranteId)
     if (error) {

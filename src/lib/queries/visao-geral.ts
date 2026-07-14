@@ -7,6 +7,7 @@ export type PeriodInfo = '7d' | '30d' | '90d'
 export interface CategoryScore {
   name: string
   score: number
+  count: number
   trend: 'up' | 'down' | 'neutral'
 }
 
@@ -28,8 +29,9 @@ export interface DashboardData {
     npsTrend: string
     criticalTheme: string
     criticalPercent: number
+    hasPrevData: boolean
   }
-  chartData: Array<{ date: string; sentiment: number; avaliacoes: number }>
+  chartData: Array<{ date: string; sentiment: number | null; avaliacoes: number }>
   categories: CategoryScore[]
   recentFeedbacks: FeedbackItem[]
 }
@@ -71,71 +73,76 @@ export const buscarKpis = async (restauranteId: number | null, periodo: PeriodIn
 
   const totalFeedbacks = currentFeedbacks.length
   const prevTotal = previousFeedbacks.length
-  const totalTrendValue =
-    prevTotal === 0
-      ? totalFeedbacks > 0
-        ? 100
-        : 0
-      : Math.round(((totalFeedbacks - prevTotal) / prevTotal) * 100)
-  const totalTrend = `${totalTrendValue >= 0 ? '+' : ''}${totalTrendValue}%`
+  const hasPrevData = prevTotal > 0
+
+  // Trend de total: só faz sentido comparar quando há dados anteriores
+  let totalTrend: string
+  if (!hasPrevData) {
+    totalTrend = totalFeedbacks > 0 ? 'novo' : '—'
+  } else {
+    const v = Math.round(((totalFeedbacks - prevTotal) / prevTotal) * 100)
+    totalTrend = `${v >= 0 ? '+' : ''}${v}%`
+  }
+
+  const isPositivo = (f: any) =>
+    f.sentimento?.toLowerCase() === 'positivo' || f.sentimento?.toLowerCase() === 'positive'
+  const isNegativo = (f: any) =>
+    f.sentimento?.toLowerCase() === 'negativo' || f.sentimento?.toLowerCase() === 'negative'
 
   const getSentimentScore = (arr: any[]) => {
     if (!arr.length) return 0
-    const pos = arr.filter(
-      (f) =>
-        f.sentimento?.toLowerCase() === 'positivo' || f.sentimento?.toLowerCase() === 'positive',
-    ).length
-    return Math.round((pos / arr.length) * 100)
+    return Math.round((arr.filter(isPositivo).length / arr.length) * 100)
   }
 
   const sentiment = getSentimentScore(currentFeedbacks)
   const prevSentiment = getSentimentScore(previousFeedbacks)
-  const sentimentTrendValue = sentiment - prevSentiment
-  const sentimentTrend = `${sentimentTrendValue >= 0 ? '+' : ''}${sentimentTrendValue}%`
+
+  // Trend de sentimento: sem dados anteriores a comparação não tem sentido
+  let sentimentTrend: string
+  if (!hasPrevData) {
+    sentimentTrend = totalFeedbacks > 0 ? 'novo' : '—'
+  } else {
+    const v = sentiment - prevSentiment
+    sentimentTrend = `${v >= 0 ? '+' : ''}${v}%`
+  }
 
   const getNpsScore = (arr: any[]) => {
     if (!arr.length) return 0
-    const proms = arr.filter(
-      (f) =>
-        f.sentimento?.toLowerCase() === 'positivo' || f.sentimento?.toLowerCase() === 'positive',
-    ).length
-    const dets = arr.filter(
-      (f) =>
-        f.sentimento?.toLowerCase() === 'negativo' || f.sentimento?.toLowerCase() === 'negative',
-    ).length
+    const proms = arr.filter(isPositivo).length
+    const dets = arr.filter(isNegativo).length
     return Math.round(((proms - dets) / arr.length) * 100)
   }
 
   const nps = getNpsScore(currentFeedbacks)
   const prevNps = getNpsScore(previousFeedbacks)
   const npsTrendValue = nps - prevNps
-  const npsTrend = `${npsTrendValue >= 0 ? '+' : ''}${npsTrendValue}`
+  // "+0" parece bug — mostrar "—" quando sem variação
+  const npsTrend =
+    !hasPrevData || npsTrendValue === 0 ? '—' : `${npsTrendValue >= 0 ? '+' : ''}${npsTrendValue}`
 
-  const negativeFeedbacks = currentFeedbacks.filter(
-    (f) => f.sentimento?.toLowerCase() === 'negativo' || f.sentimento?.toLowerCase() === 'negative',
-  )
-  const categoriesCount = negativeFeedbacks.reduce(
-    (acc, f) => {
-      const cat = f.categoria || 'Geral'
-      acc[cat] = (acc[cat] || 0) + 1
-      return acc
-    },
-    {} as Record<string, number>,
-  )
+  // Tema crítico: usa RATIO (negativos/total na categoria) — não contagem bruta
+  // Ex: Ambiente 1 neg / 1 total = 100% > Comida 1 neg / 2 total = 50%
+  type CatStats = { total: number; negative: number }
+  const catStats: Record<string, CatStats> = {}
+  for (const f of currentFeedbacks) {
+    const cat = f.categoria || 'Geral'
+    if (!catStats[cat]) catStats[cat] = { total: 0, negative: 0 }
+    catStats[cat].total++
+    if (isNegativo(f)) catStats[cat].negative++
+  }
 
   let criticalTheme = 'Nenhum'
   let criticalPercent = 0
-  let maxCount = 0
+  let worstRatio = 0
 
-  for (const [cat, count] of Object.entries(categoriesCount)) {
-    if (count > maxCount) {
-      maxCount = count
+  for (const [cat, s] of Object.entries(catStats)) {
+    if (s.negative === 0) continue
+    const ratio = s.negative / s.total
+    if (ratio > worstRatio || (ratio === worstRatio && s.negative > catStats[criticalTheme]?.negative)) {
+      worstRatio = ratio
       criticalTheme = cat
+      criticalPercent = Math.round(ratio * 100)
     }
-  }
-
-  if (currentFeedbacks.length > 0 && maxCount > 0) {
-    criticalPercent = Math.round((maxCount / currentFeedbacks.length) * 100)
   }
 
   return {
@@ -147,6 +154,7 @@ export const buscarKpis = async (restauranteId: number | null, periodo: PeriodIn
     npsTrend,
     criticalTheme,
     criticalPercent,
+    hasPrevData,
   }
 }
 
@@ -155,37 +163,92 @@ export const buscarTendencia = async (restauranteId: number | null, periodo: Per
   const { now, currentStart, days } = getPeriodDates(periodo)
   const currentFeedbacks = feedbacks.filter((f) => isAfter(parseISO(f.created_at), currentStart))
 
-  const groupedData: Record<string, { total: number; positive: number }> = {}
+  type Bucket = { total: number; positive: number; neutral: number }
 
-  for (let i = days - 1; i >= 0; i--) {
-    const date = subDays(now, i)
-    let formatStr = 'EE'
-    if (periodo === '30d') formatStr = 'dd/MM'
-    if (periodo === '90d') formatStr = 'MMM'
-
-    const key = format(date, formatStr, { locale: ptBR })
-    if (!groupedData[key]) groupedData[key] = { total: 0, positive: 0 }
+  const addToBucket = (b: Bucket, sentimento: string | null | undefined) => {
+    const s = sentimento?.toLowerCase()
+    b.total++
+    if (s === 'positivo' || s === 'positive') b.positive++
+    else if (s === 'neutro' || s === 'neutral') b.neutral++
   }
 
-  currentFeedbacks.forEach((f) => {
-    const date = parseISO(f.created_at)
-    let formatStr = 'EE'
-    if (periodo === '30d') formatStr = 'dd/MM'
-    if (periodo === '90d') formatStr = 'MMM'
+  // positivo=100, neutro=50, negativo=0 — mantém neutro no meio e negativo no fundo
+  const calcSentiment = (b: Bucket): number | null =>
+    b.total === 0 ? null : Math.round((b.positive * 100 + b.neutral * 50) / b.total)
 
-    const key = format(date, formatStr, { locale: ptBR })
-    if (groupedData[key]) {
-      groupedData[key].total++
-      if (f.sentimento?.toLowerCase() === 'positivo' || f.sentimento?.toLowerCase() === 'positive')
-        groupedData[key].positive++
+  if (periodo === '7d') {
+    // 7 slots fixos (um por dia). Dias sem feedback ficam null.
+    // O chart usa connectNulls=true + linhas tracejadas de referência para indicar gaps.
+    const grouped: Record<string, Bucket> = {}
+    for (let i = days - 1; i >= 0; i--) {
+      const key = format(subDays(now, i), 'EE', { locale: ptBR })
+      if (!grouped[key]) grouped[key] = { total: 0, positive: 0, neutral: 0 }
+    }
+    for (const f of currentFeedbacks) {
+      const key = format(parseISO(f.created_at), 'EE', { locale: ptBR })
+      if (grouped[key]) addToBucket(grouped[key], f.sentimento)
+    }
+    return Object.entries(grouped).map(([date, b]) => ({
+      date,
+      sentiment: calcSentiment(b),
+      avaliacoes: b.total,
+    }))
+  }
+
+  if (periodo === '30d') {
+    // 30 slots fixos (1 por dia, do mesmo dia do mês passado até hoje).
+    // Dias sem feedback ficam null — gap na linha = indicador visual de ausência.
+    const grouped: Record<string, Bucket & { label: string }> = {}
+    for (let i = days - 1; i >= 0; i--) {
+      const d = subDays(now, i)
+      const key = format(d, 'yyyy-MM-dd')
+      grouped[key] = {
+        total: 0,
+        positive: 0,
+        neutral: 0,
+        label: format(d, 'd MMM', { locale: ptBR }),
+      }
+    }
+    for (const f of currentFeedbacks) {
+      const key = format(parseISO(f.created_at), 'yyyy-MM-dd')
+      if (grouped[key]) addToBucket(grouped[key], f.sentimento)
+    }
+    return Object.entries(grouped)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, b]) => ({
+        date: b.label,
+        sentiment: calcSentiment(b),
+        avaliacoes: b.total,
+      }))
+  }
+
+  // 90d — 1 slot por mês do intervalo (3–4 meses). Meses sem feedback ficam null.
+  // Chart usa linhas tracejadas de referência para meses sem dados.
+  const firstMonthDate = new Date(currentStart.getFullYear(), currentStart.getMonth(), 1)
+  const months: Date[] = []
+  for (
+    let m = new Date(firstMonthDate);
+    m <= now;
+    m = new Date(m.getFullYear(), m.getMonth() + 1, 1)
+  ) {
+    months.push(new Date(m))
+  }
+  const monthMap: Record<string, Bucket> = {}
+  for (const monthDate of months) {
+    monthMap[format(monthDate, 'yyyy-MM')] = { total: 0, positive: 0, neutral: 0 }
+  }
+  for (const f of currentFeedbacks) {
+    const key = format(parseISO(f.created_at), 'yyyy-MM')
+    if (monthMap[key]) addToBucket(monthMap[key], f.sentimento)
+  }
+  return months.map((monthDate) => {
+    const key = format(monthDate, 'yyyy-MM')
+    return {
+      date: format(monthDate, 'MMM', { locale: ptBR }),
+      sentiment: calcSentiment(monthMap[key]),
+      avaliacoes: monthMap[key].total,
     }
   })
-
-  return Object.entries(groupedData).map(([date, stats]) => ({
-    date,
-    sentiment: stats.total === 0 ? 50 : Math.round((stats.positive / stats.total) * 100),
-    avaliacoes: stats.total,
-  }))
 }
 
 export const buscarCategorias = async (restauranteId: number | null, periodo: PeriodInfo) => {
@@ -220,8 +283,9 @@ export const buscarCategorias = async (restauranteId: number | null, periodo: Pe
   })
 
   return Object.entries(categoryMap)
+    .filter(([_, stats]) => stats.total > 0)
     .map(([name, stats]) => {
-      const score = stats.total === 0 ? 0 : Math.round((stats.positive / stats.total) * 100)
+      const score = Math.round((stats.positive / stats.total) * 100)
       const prevScore =
         stats.prevTotal === 0 ? 0 : Math.round((stats.prevPositive / stats.prevTotal) * 100)
 
@@ -229,9 +293,9 @@ export const buscarCategorias = async (restauranteId: number | null, periodo: Pe
       if (score > prevScore) trend = 'up'
       else if (score < prevScore) trend = 'down'
 
-      return { name, score, trend } as CategoryScore
+      return { name, score, count: stats.total, trend } as CategoryScore
     })
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => b.count - a.count)
 }
 
 export const buscarUltimosFeedbacks = async (
@@ -250,13 +314,25 @@ export const buscarUltimosFeedbacks = async (
   if (error) throw error
 
   const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
 
   return (data || []).map((f) => {
     const date = parseISO(f.created_at)
-    const hours = Math.round((now.getTime() - date.getTime()) / (1000 * 60 * 60))
-    let timeAgo = `há ${hours}h`
-    if (hours > 24) timeAgo = `há ${Math.round(hours / 24)} dias`
-    if (hours === 0) timeAgo = 'agora mesmo'
+    const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    const calendarDays = Math.round(
+      (todayStart.getTime() - dateStart.getTime()) / (1000 * 60 * 60 * 24),
+    )
+    const diffMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60))
+    const h = date.getHours()
+    const m = date.getMinutes()
+    const hourStr = m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, '0')}`
+
+    let timeAgo: string
+    if (diffMinutes < 2) timeAgo = 'agora mesmo'
+    else if (diffMinutes < 60) timeAgo = `há ${diffMinutes}min`
+    else if (calendarDays === 0) timeAgo = `hoje às ${hourStr}`
+    else if (calendarDays === 1) timeAgo = 'Ontem'
+    else timeAgo = `há ${calendarDays} dias`
 
     let sentiment: 'positive' | 'neutral' | 'negative' = 'neutral'
     if (f.sentimento?.toLowerCase() === 'positivo' || f.sentimento?.toLowerCase() === 'positive')

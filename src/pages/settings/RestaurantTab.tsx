@@ -60,7 +60,7 @@ export function RestaurantTab({ restauranteId }: { restauranteId: number | null 
     if (!restauranteId) return
     setSaving(true)
     const { error } = await supabase
-      .from('config_restaurantes')
+      .from('restaurantes')
       .update({
         nome_restaurante: formData.nome_restaurante,
         detalhes: formData.detalhes,
@@ -108,7 +108,7 @@ export function RestaurantTab({ restauranteId }: { restauranteId: number | null 
     } = supabase.storage.from('logos').getPublicUrl(filePath)
 
     const { error: updateError } = await supabase
-      .from('config_restaurantes')
+      .from('restaurantes')
       .update({ logo_url: publicUrl } as any)
       .eq('id', restauranteId)
 

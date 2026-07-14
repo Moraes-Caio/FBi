@@ -25,7 +25,7 @@ serve(async (req: Request) => {
     let targetRestauranteId = restaurante_id
     if (!targetRestauranteId) {
       const { data: firstRest } = await supabaseAdmin
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('id')
         .eq('ativo', true)
         .limit(1)
@@ -71,7 +71,7 @@ serve(async (req: Request) => {
     let maxSugestoes = 3
     if (targetRestauranteId) {
       const { data: config } = await supabaseAdmin
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('config_insights')
         .eq('id', targetRestauranteId)
         .single()

@@ -45,12 +45,26 @@ export async function buscarFeedbacks(filtros: FiltrosFeedback, limit: number, o
   return { feedbacks: data || [], total: count || 0 }
 }
 
-export async function buscarCategoriasAtivas(restauranteId?: number) {
-  let query = supabase.from('categorias').select('nome').eq('ativa', true)
+export async function buscarCategoriasAtivas(
+  restauranteId?: number,
+  periodo?: FiltrosFeedback['periodo'],
+) {
+  let query = supabase
+    .from('feedbacks_restaurante')
+    .select('categoria')
+    .not('categoria', 'is', null)
+
   if (restauranteId) {
     query = query.eq('restaurante_id', restauranteId)
   }
+
+  if (periodo && periodo !== 'all') {
+    const days = periodo === '7d' ? 7 : periodo === '30d' ? 30 : 90
+    const startDate = startOfDay(subDays(new Date(), days)).toISOString()
+    query = query.gte('created_at', startDate)
+  }
+
   const { data, error } = await query
   if (error) throw error
-  return data?.map((c) => c.nome) || []
+  return [...new Set(data?.map((d) => d.categoria).filter(Boolean) as string[])].sort()
 }

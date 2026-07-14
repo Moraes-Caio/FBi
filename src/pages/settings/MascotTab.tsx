@@ -94,7 +94,7 @@ export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
     if (!restauranteId) return
     setSaving(true)
     const { error } = await supabase
-      .from('config_restaurantes')
+      .from('restaurantes')
       .update({ mascote_config: assistente } as any)
       .eq('id', restauranteId)
 

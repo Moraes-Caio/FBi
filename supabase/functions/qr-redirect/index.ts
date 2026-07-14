@@ -41,7 +41,7 @@ serve(async (req: Request) => {
 
     // Busca o número do WhatsApp do restaurante
     const { data: config, error: configErr } = await supabaseAdmin
-      .from('config_restaurantes')
+      .from('restaurantes')
       .select('numero_whatsapp')
       .eq('id', qrCode.restaurante_id)
       .single()

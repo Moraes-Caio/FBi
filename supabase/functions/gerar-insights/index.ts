@@ -22,7 +22,7 @@ async function processarRestaurante(
 ) {
   // Busca configurações e thresholds do restaurante
   const { data: config, error: configErr } = await supabaseAdmin
-    .from('config_restaurantes')
+    .from('restaurantes')
     .select('*')
     .eq('id', restauranteId)
     .single()
@@ -190,7 +190,7 @@ ${JSON.stringify(feedbacks.map((f: any) => ({ texto: f.texto_original, sentiment
 
     // Atualiza o marcador de última análise
     await supabaseAdmin
-      .from('config_restaurantes')
+      .from('restaurantes')
       .update({ ultima_analise_insights: new Date().toISOString() })
       .eq('id', restauranteId)
 
@@ -249,7 +249,7 @@ serve(async (req: Request) => {
       }
 
       const { data: restaurantes, error: restErr } = await supabaseAdmin
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('id')
 
       if (restErr) throw restErr

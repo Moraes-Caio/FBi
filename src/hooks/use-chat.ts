@@ -7,6 +7,7 @@ export interface MensagemChat {
   id?: string
   role: 'user' | 'assistant'
   text: string
+  imageUrl?: string
   intent?: 'criar_acao' | 'criar_insight' | null
   suggestedData?: any
 }
@@ -16,7 +17,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [sessaoId] = useState(() => {
+  const [sessaoId, setSessaoId] = useState(() => {
     const saved = localStorage.getItem('chat_sessao_id')
     const savedTime = localStorage.getItem('chat_sessao_time')
     if (saved && savedTime && Date.now() - parseInt(savedTime) < 24 * 60 * 60 * 1000) {
@@ -70,13 +71,14 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     texto: string,
     contextoDadosAdicionais: any = {},
     systemMessageOverride?: string,
-  ) => {
+    imageUrl?: string,
+  ): Promise<{ error: string } | null> => {
     setLoading(true)
     setError(null)
 
     let currentMessages = [...messages]
-    if (texto) {
-      currentMessages = [...currentMessages, { role: 'user', text: texto }]
+    if (texto || imageUrl) {
+      currentMessages = [...currentMessages, { role: 'user', text: texto, imageUrl }]
       setMessages(currentMessages)
     }
 
@@ -88,7 +90,18 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
       const apiMessages: ChatMessage[] = [
         { role: 'system', content: sysPrompt },
-        ...currentMessages.map((m) => ({ role: m.role, content: m.text }) as ChatMessage),
+        ...currentMessages.map((m): ChatMessage => {
+          if (m.imageUrl) {
+            return {
+              role: m.role,
+              content: [
+                { type: 'image_url', image_url: { url: m.imageUrl, detail: 'low' } },
+                ...(m.text ? [{ type: 'text' as const, text: m.text }] : []),
+              ],
+            }
+          }
+          return { role: m.role, content: m.text }
+        }),
       ]
 
       const resposta = await enviarMensagem(apiMessages)
@@ -102,9 +115,11 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
         suggestedData = deteccao.dadosSugeridos
       }
 
+      const respostaTexto = typeof resposta === 'string' ? resposta : JSON.stringify(resposta)
+
       const msgAssistente: MensagemChat = {
         role: 'assistant',
-        text: resposta,
+        text: respostaTexto,
         intent,
         suggestedData,
       }
@@ -128,17 +143,34 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
         await supabase.from('mensagens_chat').insert({
           usuario_id: user.id,
           sessao_id: sessaoId,
-          mensagem: resposta,
+          mensagem: respostaTexto,
           papel: 'assistente',
           contexto_pagina: contextoPagina,
           contexto_dados: contextoFinal,
         })
       }
+      return null
     } catch (err: any) {
-      setError(err.message || 'Erro ao comunicar com a IA')
+      const msg = err.message || 'Erro ao comunicar com a IA'
+      setError(msg)
+      return { error: msg }
     } finally {
       setLoading(false)
     }
+  }
+
+  const novaConversa = () => {
+    const newId = crypto.randomUUID()
+    localStorage.setItem('chat_sessao_id', newId)
+    localStorage.setItem('chat_sessao_time', Date.now().toString())
+    setSessaoId(newId)
+    setMessages([])
+  }
+
+  const mudarSessao = async (id: string) => {
+    setSessaoId(id)
+    setMessages([])
+    await carregarHistorico(id)
   }
 
   return {
@@ -151,5 +183,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     setMessages,
     setError,
     sessaoId,
+    novaConversa,
+    mudarSessao,
   }
 }

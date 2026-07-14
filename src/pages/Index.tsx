@@ -1,9 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { PeriodInfo, DashboardData } from '@/lib/queries/visao-geral'
-import { AiBanner } from '@/components/dashboard/AiBanner'
 import { KpiCards } from '@/components/dashboard/KpiCards'
 import { TrendChart } from '@/components/dashboard/TrendChart'
-import { CategoryScores } from '@/components/dashboard/CategoryScores'
 import { RecentFeedbacks } from '@/components/dashboard/RecentFeedbacks'
 import {
   buscarKpis,
@@ -24,12 +22,14 @@ export default function Index() {
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
   const { usuario } = useAuth()
+  // Skeleton só aparece no carregamento inicial — troca de período atualiza silenciosamente
+  const hasLoadedOnce = useRef(false)
 
   useEffect(() => {
     let mounted = true
 
     const loadData = async () => {
-      setIsLoading(true)
+      if (!hasLoadedOnce.current) setIsLoading(true)
       try {
         const restauranteId = usuario?.restaurante_id ?? null
 
@@ -42,6 +42,7 @@ export default function Index() {
 
         if (!mounted) return
         setData({ kpis, chartData, categories, recentFeedbacks })
+        hasLoadedOnce.current = true
       } catch (error) {
         console.error('Erro ao carregar visão geral:', error)
         if (mounted) {
@@ -60,27 +61,24 @@ export default function Index() {
     return () => { mounted = false }
   }, [period, toast, usuario])
 
-  const isEmpty = !isLoading && data?.kpis.totalFeedbacks === 0
+  // isNeverUsed: sem dados em nenhum período → tela de boas-vindas
+  // isPeriodEmpty: tem dados históricos mas zero no período atual → mostrar dashboard com aviso
+  const isNeverUsed = !isLoading && data?.kpis.totalFeedbacks === 0 && !data?.kpis.hasPrevData
+  const isPeriodEmpty = !isLoading && data?.kpis.totalFeedbacks === 0 && data?.kpis.hasPrevData
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-10">
-      <AiBanner />
 
       {isLoading ? (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
+          <div className="flex items-center gap-10">
+            <Skeleton className="h-14 w-32" />
+            <Skeleton className="h-14 w-32" />
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Skeleton className="col-span-1 lg:col-span-2 h-[350px] w-full" />
-            <Skeleton className="col-span-1 h-[350px] w-full" />
-          </div>
+          <Skeleton className="h-[350px] w-full" />
           <Skeleton className="h-[400px] w-full" />
         </>
-      ) : isEmpty ? (
+      ) : isNeverUsed ? (
         <div className="flex flex-col items-center justify-center py-24 text-center">
           <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-blue-50 mb-6">
             <MessageSquare className="h-10 w-10 text-[#1D4ED8]" />
@@ -106,11 +104,18 @@ export default function Index() {
         </div>
       ) : data ? (
         <>
+          {isPeriodEmpty && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Nenhum feedback recebido neste período. Altere o intervalo ou aguarde novos feedbacks.
+            </div>
+          )}
           <KpiCards data={data.kpis} />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <TrendChart data={data.chartData} period={period} onPeriodChange={setPeriod} />
-            <CategoryScores categories={data.categories} />
-          </div>
+          <TrendChart
+            data={data.chartData}
+            categories={data.categories}
+            period={period}
+            onPeriodChange={setPeriod}
+          />
           <RecentFeedbacks feedbacks={data.recentFeedbacks} />
         </>
       ) : null}

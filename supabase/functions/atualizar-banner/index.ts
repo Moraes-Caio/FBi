@@ -26,7 +26,7 @@ serve(async (req: Request) => {
 
     if (process_all) {
       const { data } = await supabaseAdmin
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('id')
         .eq('ativo', true)
       restaurantes = data || []
@@ -34,7 +34,7 @@ serve(async (req: Request) => {
       restaurantes = [{ id: restaurante_id }]
     } else {
       const { data } = await supabaseAdmin
-        .from('config_restaurantes')
+        .from('restaurantes')
         .select('id')
         .eq('ativo', true)
         .limit(1)
@@ -54,7 +54,7 @@ serve(async (req: Request) => {
     for (const rest of restaurantes) {
       try {
         const { data: config, error: configErr } = await supabaseAdmin
-          .from('config_restaurantes')
+          .from('restaurantes')
           .select('ultima_atualizacao_banner, mascote_config')
           .eq('id', rest.id)
           .single()
@@ -95,7 +95,7 @@ serve(async (req: Request) => {
 
         if (feedbacks.length < 3) {
           await supabaseAdmin
-            .from('config_restaurantes')
+            .from('restaurantes')
             .update({
               texto_banner: textoPadrao,
               ultima_atualizacao_banner: new Date().toISOString(),
@@ -143,7 +143,7 @@ ${JSON.stringify(feedbacks)}`
           aiData.choices?.[0]?.message?.content?.replace(/\*/g, '')?.trim() ?? textoPadrao
 
         await supabaseAdmin
-          .from('config_restaurantes')
+          .from('restaurantes')
           .update({
             texto_banner: textoBanner,
             ultima_atualizacao_banner: new Date().toISOString(),
