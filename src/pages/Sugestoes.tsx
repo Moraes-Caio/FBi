@@ -33,7 +33,7 @@ import { useAuth } from '@/hooks/use-auth'
 import {
   buscarSugestoes,
   criarSugestao,
-  finalizarSugestao,
+  excluirSugestao,
   getSignedUrls,
   uploadArquivosSugestao,
   type Sugestao,
@@ -57,7 +57,7 @@ const statusConfig = {
     className: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
     icon: CheckCircle2,
   },
-}
+} as const
 
 // ── Arquivo preview ────────────────────────────────────────────────────────────
 
@@ -75,16 +75,16 @@ function isImage(path: string) {
 
 function SugestaoCard({
   sugestao,
-  onFinalizar,
+  onExcluir,
 }: {
   sugestao: Sugestao
-  onFinalizar: (id: string) => Promise<void>
+  onExcluir: (id: string) => Promise<void>
 }) {
   const [aberto, setAberto] = useState(sugestao.status === 'respondida')
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({})
-  const [finalizando, setFinalizando] = useState(false)
+  const [excluindo, setExcluindo] = useState(false)
   const [urlsCarregadas, setUrlsCarregadas] = useState(false)
-  const cfg = statusConfig[sugestao.status]
+  const cfg = statusConfig[sugestao.status] ?? statusConfig.aberta
   const StatusIcon = cfg.icon
 
   const carregarUrls = useCallback(async () => {
@@ -99,12 +99,12 @@ function SugestaoCard({
     setAberto((v) => !v)
   }
 
-  const handleFinalizar = async () => {
-    setFinalizando(true)
+  const handleExcluir = async () => {
+    setExcluindo(true)
     try {
-      await onFinalizar(sugestao.id)
+      await onExcluir(sugestao.id)
     } finally {
-      setFinalizando(false)
+      setExcluindo(false)
     }
   }
 
@@ -248,25 +248,23 @@ function SugestaoCard({
             </div>
           )}
 
-          {/* Ações */}
-          {sugestao.status !== 'finalizada' && (
-            <div className="flex justify-end pt-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleFinalizar}
-                disabled={finalizando}
-                className="gap-2 text-xs text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800"
-              >
-                {finalizando ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                )}
-                Marcar como finalizado
-              </Button>
-            </div>
-          )}
+          {/* Finalizar = excluir */}
+          <div className="flex justify-end pt-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExcluir}
+              disabled={excluindo}
+              className="gap-2 text-xs text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800"
+            >
+              {excluindo ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              )}
+              Finalizar
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -363,24 +361,19 @@ export default function Sugestoes() {
     }
   }
 
-  // ── Finalizar ──
+  // ── Finalizar (= excluir) ──
 
-  const handleFinalizar = async (id: string) => {
+  const handleExcluir = async (id: string) => {
     try {
-      await finalizarSugestao(id)
-      setSugestoes((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, status: 'finalizada' } : s)),
-      )
-      toast({ title: 'Marcado como finalizado' })
+      await excluirSugestao(id)
+      setSugestoes((prev) => prev.filter((s) => s.id !== id))
+      toast({ title: 'Finalizado e removido.' })
     } catch {
       toast({ title: 'Erro ao finalizar', variant: 'destructive' })
     }
   }
 
   // ── Render ──
-
-  const abertas = sugestoes.filter((s) => s.status !== 'finalizada')
-  const finalizadas = sugestoes.filter((s) => s.status === 'finalizada')
 
   return (
     <div className="mx-auto max-w-[780px] pb-12 animate-fade-in-up">
@@ -422,29 +415,10 @@ export default function Sugestoes() {
           </Button>
         </div>
       ) : (
-        <div className="flex flex-col gap-6">
-          {/* Em aberto / respondidas */}
-          {abertas.length > 0 && (
-            <div className="flex flex-col gap-3">
-              {abertas.map((s) => (
-                <SugestaoCard key={s.id} sugestao={s} onFinalizar={handleFinalizar} />
-              ))}
-            </div>
-          )}
-
-          {/* Finalizadas */}
-          {finalizadas.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-                Finalizadas
-              </p>
-              <div className="flex flex-col gap-3 opacity-70">
-                {finalizadas.map((s) => (
-                  <SugestaoCard key={s.id} sugestao={s} onFinalizar={handleFinalizar} />
-                ))}
-              </div>
-            </div>
-          )}
+        <div className="flex flex-col gap-3">
+          {sugestoes.map((s) => (
+            <SugestaoCard key={s.id} sugestao={s} onExcluir={handleExcluir} />
+          ))}
         </div>
       )}
 

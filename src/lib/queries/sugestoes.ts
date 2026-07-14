@@ -67,10 +67,10 @@ export async function criarSugestao(
   if (error) throw error
 }
 
-export async function finalizarSugestao(id: string): Promise<void> {
+export async function excluirSugestao(id: string): Promise<void> {
   const { error } = await supabase
     .from('sugestoes_plataforma')
-    .update({ status: 'finalizada' })
+    .delete()
     .eq('id', id)
   if (error) throw error
 }
