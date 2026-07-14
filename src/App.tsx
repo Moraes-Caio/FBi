@@ -21,7 +21,6 @@ import RecuperarSenha from './pages/auth/RecuperarSenha'
 import Onboarding from './pages/auth/Onboarding'
 import OnboardingMembro from './pages/auth/OnboardingMembro'
 import MyAccount from './pages/MyAccount'
-import Notifications from './pages/Notifications'
 import { RotaProtegida } from './components/RotaProtegida'
 import { RotaPermitida } from './components/RotaPermitida'
 
@@ -98,7 +97,6 @@ const App = () => (
                   </RotaPermitida>
                 }
               />
-              <Route path="/notificacoes" element={<Notifications />} />
             </Route>
           </Route>
 

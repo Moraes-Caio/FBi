@@ -10,15 +10,8 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Calendar, Search, Folder } from 'lucide-react'
+import { Calendar, Search, Folder, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { buscarFeedbacks, buscarCategoriasAtivas, FiltrosFeedback } from '@/lib/queries/feedbacks'
@@ -126,39 +119,6 @@ export default function Feedbacks() {
             </SelectContent>
           </Select>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                className="h-10 bg-white font-normal text-muted-foreground hover:text-foreground shadow-sm border-gray-200"
-              >
-                Categorias
-                {filtros.categorias.length > 0 && (
-                  <Badge
-                    variant="secondary"
-                    className="ml-2 bg-[#EFF6FF] text-[#1D4ED8] hover:bg-blue-100 px-1.5 py-0 text-xs font-semibold rounded-md border-transparent"
-                  >
-                    {filtros.categorias.length}
-                  </Badge>
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56">
-              {categoriasDisponiveis.map((cat) => (
-                <DropdownMenuCheckboxItem
-                  key={cat}
-                  checked={filtros.categorias.includes(cat)}
-                  onCheckedChange={() => toggleCategoria(cat)}
-                >
-                  {cat}
-                </DropdownMenuCheckboxItem>
-              ))}
-              {categoriasDisponiveis.length === 0 && (
-                <div className="p-2 text-sm text-gray-500 text-center">Nenhuma categoria</div>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
           <div className="relative flex-1 min-w-[220px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
@@ -185,6 +145,39 @@ export default function Feedbacks() {
           </Select>
         </div>
       </div>
+
+      {/* Chips de categorias */}
+      {categoriasDisponiveis.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-xs font-medium text-gray-400 shrink-0">Categoria:</span>
+          {categoriasDisponiveis.map((cat) => {
+            const ativo = filtros.categorias.includes(cat)
+            return (
+              <button
+                key={cat}
+                onClick={() => toggleCategoria(cat)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[12px] font-medium border transition-all',
+                  ativo
+                    ? 'bg-[#1D4ED8] text-white border-[#1D4ED8] shadow-sm'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400 hover:text-gray-800',
+                )}
+              >
+                {cat}
+                {ativo && <X className="h-3 w-3 opacity-80" />}
+              </button>
+            )
+          })}
+          {filtros.categorias.length > 0 && (
+            <button
+              onClick={() => setFiltros((prev) => ({ ...prev, categorias: [] }))}
+              className="text-[11px] text-gray-400 hover:text-gray-600 underline underline-offset-2 ml-1"
+            >
+              Limpar
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="space-y-4">
         {loading && feedbacks.length === 0 ? (

@@ -1,14 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useLocation, Link, useNavigate } from 'react-router-dom'
-import { Bell, LogOut, Settings as SettingsIcon, User as UserIcon, CheckCircle } from 'lucide-react'
+import { LogOut, Settings as SettingsIcon, User as UserIcon } from 'lucide-react'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
 import { useUserProfile } from '@/hooks/use-user-profile'
-import { supabase } from '@/lib/supabase/client'
 import { getIniciais } from '@/lib/iniciais'
-import { formatDistanceToNow } from 'date-fns'
-import { ptBR } from 'date-fns/locale'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,7 +14,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +24,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { ScrollArea } from '@/components/ui/scroll-area'
 
 const routeTitles: Record<string, string> = {
   '/': 'Visão Geral',
@@ -36,14 +31,6 @@ const routeTitles: Record<string, string> = {
   '/insights': 'Insights',
   '/acoes': 'Ações',
   '/relatorios': 'Relatórios',
-}
-
-interface Notificacao {
-  id: string
-  titulo: string
-  mensagem: string
-  lida: boolean
-  created_at: string
 }
 
 export function TopHeader() {
@@ -54,44 +41,10 @@ export function TopHeader() {
   const title = routeTitles[location.pathname] || 'Dashboard'
 
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
-  const [notificacoes, setNotificacoes] = useState<Notificacao[]>([])
-  const unreadCount = notificacoes.filter((n) => !n.lida).length
-
-  useEffect(() => {
-    if (profile?.restaurante_id) {
-      const fetchNotificacoes = async () => {
-        const { data } = await supabase
-          .from('notificacoes')
-          .select('*')
-          .eq('restaurante_id', profile.restaurante_id)
-          .order('created_at', { ascending: false })
-          .limit(10)
-
-        if (data) setNotificacoes(data)
-      }
-      fetchNotificacoes()
-    }
-  }, [profile?.restaurante_id])
 
   const handleLogout = async () => {
     await logout()
     navigate('/login')
-  }
-
-  const handleMarkAsRead = async (id: string) => {
-    await supabase.from('notificacoes').update({ lida: true }).eq('id', id)
-    setNotificacoes((prev) => prev.map((n) => (n.id === id ? { ...n, lida: true } : n)))
-  }
-
-  const handleMarkAllAsRead = async () => {
-    if (profile?.restaurante_id) {
-      await supabase
-        .from('notificacoes')
-        .update({ lida: true })
-        .eq('restaurante_id', profile.restaurante_id)
-        .eq('lida', false)
-      setNotificacoes((prev) => prev.map((n) => ({ ...n, lida: true })))
-    }
   }
 
   return (
@@ -103,18 +56,6 @@ export function TopHeader() {
         </div>
 
         <div className="flex items-center gap-4">
-          <Link
-            to="/notificacoes"
-            className="relative p-2 text-muted-foreground hover:bg-secondary rounded-full transition-colors"
-          >
-            <Bell className="h-5 w-5" />
-            {unreadCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground ring-2 ring-white">
-                {unreadCount}
-              </span>
-            )}
-          </Link>
-
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Avatar className="h-9 w-9 border border-border cursor-pointer hover:opacity-80 transition-opacity ring-offset-2 hover:ring-2 ring-primary/20">
