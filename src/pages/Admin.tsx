@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   ShieldCheck, ArrowLeft, Send, Paperclip, Plus, Pencil, Trash2,
-  X, Video, FileText, FileSpreadsheet, Check, Play, MessageSquare, Tag, Users, ChevronDown,
+  X, Video, FileText, FileSpreadsheet, Check, Play, MessageSquare, Tag, Users,
 } from 'lucide-react'
 import { format, isToday, isYesterday } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -20,15 +20,19 @@ import { usePlatformAdmin } from '@/hooks/use-platform-admin'
 import {
   buscarTodasSugestoes, responderSugestao, uploadArquivosResposta,
   editarRespostaAdmin, excluirRespostaAdmin, excluirArquivosAdmin,
-  marcarAdminLeu,
+  marcarAdminLeu, resetClienteLeu, reagirAdmin,
   buscarDivisoes, criarDivisao, atualizarDivisao, excluirDivisao,
   buscarAfiliados, criarAfiliado, atualizarAfiliado, excluirAfiliado,
   buscarCupons, criarCupon, atualizarCupon, excluirCupon,
-  type SugestaoAdmin, type DivisaoReceita, type Afiliado, type Cupon,
+  type SugestaoAdmin, type DivisaoReceita, type Afiliado, type Cupon, type ReacaoAdmin,
 } from '@/lib/queries/admin'
 import { getSignedUrls } from '@/lib/queries/sugestoes'
 import { supabase } from '@/lib/supabase/client'
 import { DoubleCheck } from '@/components/DoubleCheck'
+import { LinkifiedText } from '@/components/LinkifiedText'
+import { MessageMenu } from '@/components/MessageMenu'
+import { EmojiInputButton } from '@/components/EmojiPicker'
+import { QuoteBox, type QuoteInfo } from '@/components/QuoteBox'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const WA_TEAL = '#128C7E'
@@ -100,47 +104,73 @@ function openInSystem(url: string, path: string) {
     .catch(console.error)
 }
 
-interface ThreadMsg { id: string; texto: string; role: 'usuario' | 'suporte'; arquivos: string[]; time: string }
+interface ThreadMsg { id: string; texto: string; role: 'usuario' | 'suporte'; arquivos: string[]; time: string; respondeA: string | null }
 
 function buildThread(s: SugestaoAdmin): ThreadMsg[] {
-  return [
-    { id: s.id + '-m', texto: s.texto, role: 'usuario', arquivos: s.arquivos, time: s.created_at },
-    ...s.respostas.map((r) => ({
-      id: r.id, texto: r.texto,
-      role: (r.autor === 'usuario' ? 'usuario' : 'suporte') as 'usuario' | 'suporte',
-      arquivos: r.arquivos, time: r.created_at,
-    })),
-  ].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+  const msgs: ThreadMsg[] = s.respostas.map((r) => ({
+    id: r.id, texto: r.texto,
+    role: (r.autor === 'usuario' ? 'usuario' : 'suporte') as 'usuario' | 'suporte',
+    arquivos: r.arquivos, time: r.created_at, respondeA: r.responde_a ?? null,
+  }))
+  // Mensagem raiz só aparece se não foi "apagada" pelo cliente (texto + arquivos vazios)
+  if (s.texto || s.arquivos.length > 0) {
+    msgs.unshift({ id: s.id + '-m', texto: s.texto, role: 'usuario', arquivos: s.arquivos, time: s.created_at, respondeA: null })
+  }
+  return msgs.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+}
+
+function msgPreview(texto: string, arquivos: string[]): string {
+  return texto || (arquivos.length > 0 ? '📎 Arquivo' : '')
 }
 
 function lastActivity(s: SugestaoAdmin): { preview: string; time: string; isAdmin: boolean; read: boolean } {
+  // Última mensagem de conteúdo (a raiz só conta se não foi apagada)
+  const rootPresent = !!(s.texto || s.arquivos.length > 0)
+  let lastMsg: { texto: string; arquivos: string[]; time: string; isAdmin: boolean } | null = null
   if (s.respostas.length > 0) {
     const last = s.respostas[s.respostas.length - 1]
-    const isAdminMsg = last.autor !== 'usuario'
-    const read = isAdminMsg
-      ? !!(s.cliente_leu_em && new Date(s.cliente_leu_em) >= new Date(last.created_at))
-      : false
-    return { preview: last.texto || '📎 Arquivo', time: last.created_at, isAdmin: isAdminMsg, read }
+    lastMsg = { texto: last.texto, arquivos: last.arquivos, time: last.created_at, isAdmin: last.autor !== 'usuario' }
+  } else if (rootPresent) {
+    lastMsg = { texto: s.texto, arquivos: s.arquivos, time: s.created_at, isAdmin: false }
   }
-  return { preview: s.texto || '📎 Arquivo', time: s.created_at, isAdmin: false, read: false }
-}
 
-function getAdminLastRead(id: string): number {
-  return parseInt(localStorage.getItem(`fib_adm_${id}`) ?? '0', 10)
-}
-function setAdminLastRead(id: string): void {
-  localStorage.setItem(`fib_adm_${id}`, String(Date.now()))
-}
-// Threshold do divisor no thread — atualizado quando o ConversaView desmonta
-function getAdminDivTime(id: string): number {
-  return parseInt(localStorage.getItem(`fib_adm_div_${id}`) ?? '0', 10)
-}
-function setAdminDivTime(id: string, t: number): void {
-  localStorage.setItem(`fib_adm_div_${id}`, String(t))
+  // Última reação
+  const reacoes = s.reacoes ?? []
+  const lastReac = reacoes.length > 0
+    ? reacoes.reduce((a, b) => (new Date(a.created_at) >= new Date(b.created_at) ? a : b))
+    : null
+
+  // Se a reação é mais recente que a última mensagem, ela vira o preview
+  if (lastReac && (!lastMsg || new Date(lastReac.created_at) > new Date(lastMsg.time))) {
+    let alvo = ''
+    if (lastReac.mensagem_id === s.id) {
+      alvo = msgPreview(s.texto, s.arquivos)
+    } else {
+      const r = s.respostas.find((x) => x.id === lastReac.mensagem_id)
+      if (r) alvo = msgPreview(r.texto, r.arquivos)
+    }
+    const prefixo = lastReac.autor === 'admin' ? 'Você reagiu' : 'reagiu'
+    return {
+      preview: `${prefixo} com ${lastReac.emoji} a: ${alvo}`,
+      time: lastReac.created_at,
+      isAdmin: lastReac.autor === 'admin',
+      read: true,
+    }
+  }
+
+  // Tudo apagado → preview vazio
+  if (!lastMsg) {
+    return { preview: '', time: s.created_at, isAdmin: false, read: true }
+  }
+
+  const read = lastMsg.isAdmin
+    ? !!(s.cliente_leu_em && new Date(s.cliente_leu_em) >= new Date(lastMsg.time))
+    : false
+  return { preview: msgPreview(lastMsg.texto, lastMsg.arquivos), time: lastMsg.time, isAdmin: lastMsg.isAdmin, read }
 }
 
 function unreadCount(s: SugestaoAdmin): number {
-  const lastRead = getAdminLastRead(s.id)
+  const lastRead = s.admin_leu_em ? new Date(s.admin_leu_em).getTime() : 0
   if (lastRead > 0) {
     // Conta mensagens do usuário chegadas após a última vez que a conversa foi aberta
     let count = new Date(s.created_at).getTime() > lastRead ? 1 : 0
@@ -162,15 +192,16 @@ function unreadCount(s: SugestaoAdmin): number {
 
 function fmtDesconto(c: Cupon) {
   return c.tipo_desconto === 'porcentagem'
-    ? `${c.valor_desconto}%`
-    : `R$ ${Number(c.valor_desconto).toFixed(2)}`
+    ? `${c.porcentagem_desconto ?? 0}%`
+    : `R$ ${Number(c.valor_desconto ?? 0).toFixed(2)}`
 }
 
 // ── ConvItem ──────────────────────────────────────────────────────────────────
 function ConvItem({ s, selected, onClick }: { s: SugestaoAdmin; selected: boolean; onClick: () => void }) {
   const { preview, time, isAdmin, read } = lastActivity(s)
   const count = unreadCount(s)
-  const name = s.usuario_nome ?? s.usuario_email ?? s.usuario_id.slice(0, 8)
+  const name = s.perfil?.nome_restaurante ?? s.usuario_nome ?? s.usuario_email ?? s.usuario_id.slice(0, 8)
+  const logo = s.perfil?.logo_url
   return (
     <button
       onClick={onClick}
@@ -179,9 +210,13 @@ function ConvItem({ s, selected, onClick }: { s: SugestaoAdmin; selected: boolea
         selected ? 'bg-[#EFF6FF]' : 'hover:bg-gray-50',
       )}
     >
-      <div className={cn('h-10 w-10 rounded-full shrink-0 flex items-center justify-center text-white text-sm font-semibold', avatarColor(name))}>
-        {initials(s.usuario_nome, s.usuario_email)}
-      </div>
+      {logo ? (
+        <img src={logo} alt={name} className="h-10 w-10 rounded-full shrink-0 object-cover bg-gray-100" />
+      ) : (
+        <div className={cn('h-10 w-10 rounded-full shrink-0 flex items-center justify-center text-white text-sm font-semibold', avatarColor(name))}>
+          {initials(s.perfil?.nome_restaurante ?? s.usuario_nome, s.usuario_email)}
+        </div>
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
           <span className={cn('text-sm font-semibold truncate', selected ? 'text-[#1D4ED8]' : 'text-gray-800')}>
@@ -202,6 +237,75 @@ function ConvItem({ s, selected, onClick }: { s: SugestaoAdmin; selected: boolea
         </div>
       </div>
     </button>
+  )
+}
+
+// ── PerfilPanel (restaurante + pessoa) — painel lateral direito ────────────────
+function PerfilPanel({ s, onClose }: { s: SugestaoAdmin; onClose: () => void }) {
+  const p = s.perfil
+  const nomeRest = p?.nome_restaurante ?? 'Restaurante'
+  const nomePessoa = p?.nome ?? s.usuario_nome ?? '—'
+  const email = p?.email ?? s.usuario_email ?? '—'
+
+  const Linha = ({ label, valor }: { label: string; valor: string | null }) =>
+    valor ? (
+      <div className="flex justify-between gap-3 py-2 border-b border-gray-100 last:border-0">
+        <span className="text-[12px] text-gray-500 shrink-0">{label}</span>
+        <span className="text-[13px] text-gray-800 text-right break-words">{valor}</span>
+      </div>
+    ) : null
+
+  return (
+    <div className="w-80 shrink-0 h-full flex flex-col border-l border-gray-200 bg-white animate-in slide-in-from-right duration-200">
+      <div className="shrink-0 flex items-center gap-2 px-4 h-16 border-b border-gray-100">
+        <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500">
+          <X className="h-4 w-4" />
+        </button>
+        <span className="text-sm font-semibold text-gray-800">Perfil</span>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {/* Restaurante */}
+        <div className="flex flex-col items-center text-center gap-2 pb-4 border-b border-gray-100">
+          {p?.logo_url ? (
+            <img src={p.logo_url} alt={nomeRest} className="h-24 w-24 rounded-full object-cover bg-gray-100" />
+          ) : (
+            <div className={cn('h-24 w-24 rounded-full flex items-center justify-center text-white text-2xl font-semibold', avatarColor(nomeRest))}>
+              {initials(nomeRest, null)}
+            </div>
+          )}
+          <p className="text-base font-semibold text-gray-900">{nomeRest}</p>
+          {p?.tipo_culinaria && <p className="text-[12px] text-gray-500">{p.tipo_culinaria}</p>}
+        </div>
+
+        <div className="pt-3">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase mb-1">Restaurante</p>
+          <Linha label="Nome" valor={p?.nome_restaurante ?? null} />
+          <Linha label="Culinária" valor={p?.tipo_culinaria ?? null} />
+          <Linha label="Mesas" valor={p?.numero_mesas != null ? String(p.numero_mesas) : null} />
+          <Linha label="WhatsApp" valor={p?.numero_whatsapp ?? null} />
+          <Linha label="Detalhes" valor={p?.detalhes ?? null} />
+        </div>
+
+        {/* Pessoa */}
+        <div className="pt-4">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase mb-2">Pessoa</p>
+          <div className="flex items-center gap-3">
+            {p?.avatar_url ? (
+              <img src={p.avatar_url} alt={nomePessoa} className="h-11 w-11 rounded-full object-cover bg-gray-100 shrink-0" />
+            ) : (
+              <div className={cn('h-11 w-11 rounded-full flex items-center justify-center text-white text-sm font-semibold shrink-0', avatarColor(nomePessoa))}>
+                {initials(nomePessoa, email)}
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-[13px] font-medium text-gray-800 truncate">{nomePessoa}</p>
+              <p className="text-[12px] text-gray-500 truncate">{email}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -354,8 +458,9 @@ function ThumbNovo({ file, onRemove }: { file: File; onRemove: () => void }) {
 }
 
 // ── AdminEditBubble ───────────────────────────────────────────────────────────
-function AdminEditBubble({ msg, signedUrls, onSave, onCancel }: {
+function AdminEditBubble({ msg, signedUrls, quote, onClearReply, onSave, onCancel }: {
   msg: ThreadMsg; signedUrls: Record<string, string>
+  quote: QuoteInfo | null; onClearReply: () => void
   onSave: (texto: string, existentes: string[], novos: File[], removidos: string[]) => Promise<void>
   onCancel: () => void
 }) {
@@ -396,6 +501,7 @@ function AdminEditBubble({ msg, signedUrls, onSave, onCancel }: {
     <div className="flex justify-end">
       <div className="w-[80%] max-w-[80%] rounded-2xl rounded-tr-none px-3.5 py-2.5 shadow-md space-y-2.5"
         style={{ background: WA_SENT }}>
+        {quote && <QuoteBox quote={quote} onRemove={onClearReply} className="bg-black/[0.08]" />}
         <textarea ref={taRef} value={texto} onChange={(e) => setTexto(e.target.value)}
           className="w-full bg-white/60 rounded-xl px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-[#128C7E]/30"
           rows={2} autoFocus />
@@ -436,78 +542,78 @@ function AdminEditBubble({ msg, signedUrls, onSave, onCancel }: {
 }
 
 // ── AdminBubble ───────────────────────────────────────────────────────────────
-function AdminBubble({ msg, signedUrls, onEdit, onDelete, confirmingDelete, onConfirmDelete, onCancelDelete, clienteLeuEm }: {
+function AdminBubble({ msg, signedUrls, reacoes, quote, onReact, onReply, onEdit, onDelete, selectMode, selected, onToggleSelect, clienteLeuEm }: {
   msg: ThreadMsg; signedUrls: Record<string, string>
+  reacoes: ReacaoAdmin[]; quote: QuoteInfo | null
+  onReact: (emoji: string) => void; onReply: () => void
   onEdit: () => void; onDelete: () => void
-  confirmingDelete: boolean; onConfirmDelete: () => void; onCancelDelete: () => void
+  selectMode: boolean; selected: boolean; onToggleSelect: () => void
   clienteLeuEm: string | null
 }) {
-  const [menuOpen, setMenuOpen] = useState(false)
   const isMe = msg.role === 'suporte'
+  const myReaction = reacoes.find((r) => r.autor === 'admin')?.emoji ?? null
   const msgRead = isMe
     ? !!(clienteLeuEm && new Date(clienteLeuEm) >= new Date(msg.time))
     : false
-  const menuRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!menuOpen) return
-    const close = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [menuOpen])
+  // Só mensagens do suporte podem ser selecionadas para exclusão
+  const selectable = selectMode && isMe
 
   return (
-    <div className={cn('flex group', isMe ? 'justify-end' : 'justify-start')}>
-      {isMe && (
-        <div ref={menuRef} className="relative flex items-end mb-1.5 mr-1">
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            className={cn(
-              'h-6 w-6 rounded-full flex items-center justify-center transition-all',
-              'opacity-0 group-hover:opacity-100',
-              menuOpen ? 'opacity-100 bg-black/15' : 'bg-black/10 hover:bg-black/15',
-            )}
-          >
-            <ChevronDown className="h-3.5 w-3.5 text-gray-600" />
-          </button>
-          {menuOpen && (
-            <div className="absolute bottom-8 right-0 bg-white rounded-2xl shadow-xl border border-gray-100 py-1.5 z-20 min-w-[140px]">
-              <button onClick={() => { onEdit(); setMenuOpen(false) }}
-                className="flex items-center gap-2.5 px-4 py-2 text-sm w-full text-left text-gray-700 hover:bg-gray-50 transition-colors">
-                <Pencil className="h-3.5 w-3.5 text-gray-500" /> Editar
-              </button>
-              <button onClick={() => { onDelete(); setMenuOpen(false) }}
-                className="flex items-center gap-2.5 px-4 py-2 text-sm w-full text-left text-red-600 hover:bg-red-50 transition-colors">
-                <Trash2 className="h-3.5 w-3.5" /> Excluir
-              </button>
-            </div>
-          )}
-        </div>
+    <div
+      className={cn(
+        'flex group items-center rounded-lg transition-colors',
+        isMe ? 'justify-end' : 'justify-start',
+        selectable ? 'cursor-pointer -mx-2 px-2 py-0.5' : '',
+        selected ? 'bg-black/[0.06]' : '',
+        reacoes.length > 0 ? 'mb-3' : '',
       )}
-      <div className={cn('max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-sm', isMe ? 'rounded-tr-none' : 'rounded-tl-none bg-white')}
+      onClick={selectable ? onToggleSelect : undefined}
+    >
+      {selectable && (
+        <span
+          className={cn(
+            'mr-auto shrink-0 h-5 w-5 rounded-full border flex items-center justify-center transition-colors',
+            selected ? 'bg-[#128C7E] border-[#128C7E] text-white' : 'border-gray-400 bg-white',
+          )}
+        >
+          {selected && <Check className="h-3 w-3" />}
+        </span>
+      )}
+      {isMe && !selectMode && (
+        <MessageMenu side="left" onReact={onReact} onReply={onReply} onEdit={onEdit} onDelete={onDelete} myReaction={myReaction} />
+      )}
+      <div className={cn('relative max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-sm', isMe ? 'rounded-tr-none' : 'rounded-tl-none bg-white')}
         style={isMe ? { background: WA_SENT } : undefined}>
-        {confirmingDelete ? (
-          <div className="space-y-1.5">
-            <p className="text-[12px] text-gray-600">Excluir esta mensagem?</p>
-            <div className="flex gap-3">
-              <button onClick={onCancelDelete} className="text-[12px] text-gray-500 hover:text-gray-700">Não</button>
-              <button onClick={onConfirmDelete} className="text-[12px] font-semibold text-red-600 hover:text-red-700">Excluir</button>
-            </div>
-          </div>
-        ) : (
-          <>
-            {msg.texto && <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{msg.texto}</p>}
-            {msg.arquivos.map((path) => (
-              <FilePreview key={path} path={path} url={signedUrls[path] ?? ''} isMe={isMe} />
+        {quote && <QuoteBox quote={quote} className="mb-1" />}
+        {msg.texto && (
+          <LinkifiedText text={msg.texto} className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed" />
+        )}
+        {msg.arquivos.map((path) => (
+          <FilePreview key={path} path={path} url={signedUrls[path] ?? ''} isMe={isMe} />
+        ))}
+        <p className="text-[10px] text-gray-400 text-right mt-0.5 select-none">
+          {msgTime(msg.time)}{isMe && <DoubleCheck read={msgRead} size={15} className="ml-1" />}
+        </p>
+
+        {/* Reações */}
+        {reacoes.length > 0 && (
+          <div className={cn('absolute -bottom-3 flex gap-0.5', isMe ? 'right-1' : 'left-1')}>
+            {reacoes.map((r) => (
+              <button
+                key={r.autor}
+                onClick={(e) => { e.stopPropagation(); onReact(r.emoji) }}
+                className="text-[13px] leading-none bg-white rounded-full shadow-sm border border-gray-100 px-1 py-0.5 hover:scale-110 transition-transform"
+              >
+                {r.emoji}
+              </button>
             ))}
-            <p className="text-[10px] text-gray-400 text-right mt-0.5 select-none">
-              {msgTime(msg.time)}{isMe && <DoubleCheck read={msgRead} size={15} className="ml-1" />}
-            </p>
-          </>
+          </div>
         )}
       </div>
+      {!isMe && !selectMode && (
+        <MessageMenu side="right" onReact={onReact} onReply={onReply} myReaction={myReaction} />
+      )}
     </div>
   )
 }
@@ -515,23 +621,23 @@ function AdminBubble({ msg, signedUrls, onEdit, onDelete, confirmingDelete, onCo
 // ── ConversaView ──────────────────────────────────────────────────────────────
 function ConversaView({
   s, signedUrls, replyText, replyFiles, sending,
-  onReplyTextChange, onReplyFilesChange, onRemoveFile, onSend, onRefresh, onRead,
+  onReplyTextChange, onReplyFilesChange, onRemoveFile, onSend, onRefresh, onRead, onReact,
 }: {
   s: SugestaoAdmin; signedUrls: Record<string, string>
   replyText: string; replyFiles: File[]; sending: boolean
   onReplyTextChange: (v: string) => void; onReplyFilesChange: (f: File[]) => void
-  onRemoveFile: (i: number) => void; onSend: () => void; onRefresh: () => void; onRead: () => void
+  onRemoveFile: (i: number) => void; onSend: (respondeA: string | null) => void; onRefresh: () => void; onRead: () => void
+  onReact: (mensagemId: string, emoji: string) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const newDividerRef = useRef<HTMLDivElement>(null)
-  // Captura limiar UMA VEZ ao montar — nunca muda mesmo após envio de mensagens
-  const [dividerThreshold] = useState<number>(() => {
-    const stored = getAdminDivTime(s.id)
-    if (stored > 0) return stored
-    // Primeira visita: threshold = timestamp da última resposta do suporte
+  // Captura limiar ao montar (snapshot de admin_leu_em); atualizado via setDividerThreshold quando há edição
+  const [dividerThreshold, setDividerThreshold] = useState<number>(() => {
+    if (s.admin_leu_em) return new Date(s.admin_leu_em).getTime()
+    // Nunca lida: threshold = timestamp da última resposta do suporte
     const initialThread = buildThread(s)
     for (let i = initialThread.length - 1; i >= 0; i--) {
       if (initialThread[i].role === 'suporte') {
@@ -540,8 +646,46 @@ function ConversaView({
     }
     return 0 // sem resposta do suporte: todas as msgs do usuário são não lidas
   })
-  const thread = buildThread(s)
-  const name = s.usuario_nome ?? s.usuario_email ?? s.usuario_id.slice(0, 8)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [showPerfil, setShowPerfil] = useState(false)
+  // Responder (quote)
+  const [replyTo, setReplyTo] = useState<ThreadMsg | null>(null)
+  const [replyCleared, setReplyCleared] = useState(false)
+  // Seleção múltipla para exclusão
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set()) // sumiço otimista ao excluir
+
+  const thread = buildThread(s).filter((m) => !hiddenIds.has(m.id))
+  // Id canônico da mensagem para reações (raiz usa o id da sugestão, sem o sufixo "-m")
+  const canonicalId = (id: string) => (id.endsWith('-m') ? id.slice(0, -2) : id)
+  const reacoesMap: Record<string, ReacaoAdmin[]> = {}
+  for (const r of s.reacoes ?? []) {
+    ;(reacoesMap[r.mensagem_id] ??= []).push(r)
+  }
+  const name = s.perfil?.nome_restaurante ?? s.usuario_nome ?? s.usuario_email ?? s.usuario_id.slice(0, 8)
+  const logo = s.perfil?.logo_url
+
+  // Responder (quote): resolve o alvo (id canônico) para exibição
+  const resolveQuote = (respondeA: string | null): QuoteInfo | null => {
+    if (!respondeA) return null
+    if (respondeA === s.id) {
+      return { autorLabel: name, texto: s.texto || (s.arquivos.length > 0 ? '📎 Arquivo' : '') }
+    }
+    const r = s.respostas.find((x) => x.id === respondeA)
+    if (!r) return { autorLabel: '', texto: 'mensagem removida' }
+    return {
+      autorLabel: r.autor === 'usuario' ? name : 'Você',
+      texto: r.texto || (r.arquivos.length > 0 ? '📎 Arquivo' : ''),
+    }
+  }
+  const startReply = (msg: ThreadMsg) => { setReplyCleared(false); setReplyTo(msg) }
+  const editingMsg = editingId ? buildThread(s).find((m) => m.id === editingId) ?? null : null
+  const editEffectiveReplyId = replyCleared ? null : (replyTo ? canonicalId(replyTo.id) : (editingMsg?.respondeA ?? null))
+  const doSend = () => {
+    onSend(replyTo ? canonicalId(replyTo.id) : null)
+    setReplyTo(null)
+  }
   // dividerThreshold fixo → posição do divisor estável mesmo após enviar mensagem
   const newDividerIdx = (() => {
     for (let i = 0; i < thread.length; i++) {
@@ -555,14 +699,6 @@ function ConversaView({
     ? thread.slice(newDividerIdx).filter((m) => m.role === 'usuario').length
     : 0
 
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [confirmDelId, setConfirmDelId] = useState<string | null>(null)
-
-  // Ao desmontar: grava o tempo atual como novo threshold → próxima visita sem divisor
-  useEffect(() => {
-    return () => { setAdminDivTime(s.id, getAdminLastRead(s.id) || Date.now()) }
-  }, [s.id])
-
   // Marca como lido somente quando o admin chega ao fim da conversa
   const onReadRef = useRef(onRead)
   useEffect(() => { onReadRef.current = onRead })
@@ -573,7 +709,6 @@ function ConversaView({
     const obs = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          setAdminLastRead(s.id)
           marcarAdminLeu(s.id).catch(console.error)
           onReadRef.current()
         }
@@ -591,7 +726,13 @@ function ConversaView({
     const ch = supabase
       .channel(`leitura-${s.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sugestoes_plataforma', filter: `id=eq.${s.id}` },
-        () => { onRefreshRef.current() })
+        (payload) => {
+          const newAdminLeuEm = (payload.new as any).admin_leu_em as string | null
+          const newTs = newAdminLeuEm ? new Date(newAdminLeuEm).getTime() : 0
+          // Edição do cliente rola admin_leu_em para trás → move o divisor para revelar a msg editada
+          setDividerThreshold((prev) => (newTs > 0 && newTs < prev ? newTs : prev))
+          onRefreshRef.current()
+        })
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [s.id])
@@ -615,31 +756,78 @@ function ConversaView({
   async function handleSaveEdit(msg: ThreadMsg, texto: string, existentes: string[], novos: File[], removidos: string[]) {
     if (removidos.length > 0) await excluirArquivosAdmin(removidos)
     const novosPaths = novos.length > 0 ? await uploadArquivosResposta(s.id, novos) : []
-    await editarRespostaAdmin(msg.id, texto, [...existentes, ...novosPaths])
+    const novoRespondeA = replyCleared ? null : (replyTo ? canonicalId(replyTo.id) : (msg.respondeA ?? null))
+    await editarRespostaAdmin(msg.id, texto, [...existentes, ...novosPaths], novoRespondeA)
     setEditingId(null)
+    setReplyTo(null)
+    setReplyCleared(false)
+    // Reseta leitura do cliente ANTES do refresh — mensagem editada deve ser re-lida pelo cliente
+    await resetClienteLeu(s.id, msg.time)
     onRefresh()
   }
 
-  async function handleDelete(msg: ThreadMsg) {
+  // ── Seleção múltipla para exclusão (mensagens do suporte) ──
+  const enterSelectDelete = (msg: ThreadMsg) => {
+    setEditingId(null)
+    setSelectMode(true)
+    setSelectedIds(new Set([msg.id]))
+  }
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const exitSelect = () => {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+  }
+  async function handleDeleteSelected() {
+    if (selectedIds.size === 0) return
+    const alvos = Array.from(selectedIds)
+      .map((id) => thread.find((m) => m.id === id))
+      .filter((m): m is ThreadMsg => !!m)
+    const ids = alvos.map((m) => m.id)
+    // Sumiço otimista (sem delay) + sai do modo seleção
+    setHiddenIds((prev) => new Set([...prev, ...ids]))
+    exitSelect()
     try {
-      if (msg.arquivos.length > 0) await excluirArquivosAdmin(msg.arquivos)
-      await excluirRespostaAdmin(msg.id)
-      setConfirmDelId(null)
+      for (const msg of alvos) {
+        if (msg.arquivos.length > 0) await excluirArquivosAdmin(msg.arquivos)
+        await excluirRespostaAdmin(msg.id)
+      }
       onRefresh()
-    } catch (err) { console.error(err) }
+      setHiddenIds(new Set())
+    } catch (err) {
+      console.error(err)
+      setHiddenIds(new Set())
+    }
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="shrink-0 px-4 py-3 flex items-center gap-3" style={{ background: WA_TEAL }}>
-        <div className={cn('h-9 w-9 rounded-full flex items-center justify-center text-white text-sm font-semibold shrink-0', avatarColor(name))}>
-          {initials(s.usuario_nome, s.usuario_email)}
-        </div>
+    <div className="flex h-full">
+      <div className="flex flex-col h-full flex-1 min-w-0">
+      <button
+        type="button"
+        onClick={() => setShowPerfil((v) => !v)}
+        className="shrink-0 w-full text-left px-4 py-3 flex items-center gap-3 hover:brightness-95 transition-all"
+        style={{ background: WA_TEAL }}
+        title="Ver perfil"
+      >
+        {logo ? (
+          <img src={logo} alt={name} className="h-9 w-9 rounded-full object-cover shrink-0 bg-white/20" />
+        ) : (
+          <div className={cn('h-9 w-9 rounded-full flex items-center justify-center text-white text-sm font-semibold shrink-0', avatarColor(name))}>
+            {initials(s.perfil?.nome_restaurante ?? s.usuario_nome, s.usuario_email)}
+          </div>
+        )}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white leading-tight">{name}</p>
+          <p className="text-sm font-semibold text-white leading-tight truncate">{name}</p>
           {s.usuario_email && <p className="text-[12px] text-white/70 truncate">{s.usuario_email}</p>}
         </div>
-      </div>
+      </button>
 
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-1.5" style={{ background: WA_BG }}>
         {thread.map((msg, i) => (
@@ -660,19 +848,25 @@ function ConversaView({
               <AdminEditBubble
                 msg={msg}
                 signedUrls={signedUrls}
+                quote={resolveQuote(editEffectiveReplyId)}
+                onClearReply={() => { setReplyTo(null); setReplyCleared(true) }}
                 onSave={(texto, existentes, novos, removidos) => handleSaveEdit(msg, texto, existentes, novos, removidos)}
-                onCancel={() => setEditingId(null)}
+                onCancel={() => { setEditingId(null); setReplyTo(null); setReplyCleared(false) }}
               />
             ) : (
               <AdminBubble
                 msg={msg}
                 signedUrls={signedUrls}
                 clienteLeuEm={s.cliente_leu_em}
-                onEdit={() => { setEditingId(msg.id); setConfirmDelId(null) }}
-                onDelete={() => { setConfirmDelId(msg.id); setEditingId(null) }}
-                confirmingDelete={confirmDelId === msg.id}
-                onConfirmDelete={() => handleDelete(msg)}
-                onCancelDelete={() => setConfirmDelId(null)}
+                reacoes={reacoesMap[canonicalId(msg.id)] ?? []}
+                quote={resolveQuote(msg.respondeA)}
+                onReact={(emoji) => onReact(canonicalId(msg.id), emoji)}
+                onReply={() => startReply(msg)}
+                onEdit={() => { setReplyTo(null); setReplyCleared(false); setEditingId(msg.id) }}
+                onDelete={() => enterSelectDelete(msg)}
+                selectMode={selectMode}
+                selected={selectedIds.has(msg.id)}
+                onToggleSelect={() => toggleSelect(msg.id)}
               />
             )}
           </Fragment>
@@ -680,7 +874,34 @@ function ConversaView({
         <div ref={bottomRef} />
       </div>
 
+      {selectMode ? (
+        <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-3 bg-white border-t border-gray-200">
+          <button onClick={exitSelect} className="text-sm font-medium text-gray-600 hover:text-gray-800 px-3 py-2">
+            Cancelar
+          </button>
+          <span className="text-sm text-gray-500">
+            {selectedIds.size} selecionada{selectedIds.size !== 1 ? 's' : ''}
+          </span>
+          <button
+            onClick={handleDeleteSelected}
+            disabled={selectedIds.size === 0}
+            className="flex items-center gap-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg px-4 py-2 transition-colors"
+          >
+            <Trash2 className="h-4 w-4" />
+            Excluir
+          </button>
+        </div>
+      ) : (
       <div className="shrink-0 px-3 py-3" style={{ background: '#F0F2F5' }}>
+        {replyTo && (
+          <div className="mb-2">
+            <QuoteBox
+              quote={resolveQuote(canonicalId(replyTo.id)) ?? { autorLabel: '', texto: '' }}
+              onRemove={() => setReplyTo(null)}
+              className="bg-white"
+            />
+          </div>
+        )}
         {replyFiles.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
             {replyFiles.map((file, idx) => (
@@ -711,15 +932,16 @@ function ConversaView({
             title="Anexar arquivo">
             <Paperclip className="h-4 w-4" />
           </button>
+          <EmojiInputButton onPick={(em) => onReplyTextChange(replyText + em)} />
           <input ref={fileInputRef} type="file" multiple className="hidden"
             onChange={(e) => { onReplyFilesChange([...replyFiles, ...Array.from(e.target.files ?? [])]); e.target.value = '' }} />
           <textarea ref={textareaRef} value={replyText} onChange={autoResize}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend() } }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend() } }}
             placeholder="Digite uma mensagem"
             rows={1}
             className="flex-1 resize-none rounded-3xl border-0 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none shadow-sm"
             style={{ minHeight: '40px', maxHeight: '128px' }} />
-          <button onClick={onSend} disabled={(!replyText.trim() && replyFiles.length === 0) || sending}
+          <button onClick={doSend} disabled={(!replyText.trim() && replyFiles.length === 0) || sending}
             className={cn(
               'shrink-0 h-10 w-10 flex items-center justify-center rounded-full transition-all shadow-sm',
               (replyText.trim() || replyFiles.length > 0) && !sending ? 'text-white hover:scale-105' : 'bg-gray-300 text-gray-400 cursor-not-allowed',
@@ -729,6 +951,9 @@ function ConversaView({
           </button>
         </div>
       </div>
+      )}
+      </div>
+      {showPerfil && <PerfilPanel s={s} onClose={() => setShowPerfil(false)} />}
     </div>
   )
 }
@@ -777,10 +1002,16 @@ const TAB_LABELS: Record<Tab, string> = {
 
 // Form defaults
 const EMPTY_DIVISAO = { nome: '', chave_pix: '', tipo: 'porcentagem' as const, valor: '', ativo: true }
-const EMPTY_AFILIADO = { nome: '', email: '', codigo: '', comissao_tipo: 'porcentagem' as const, comissao_valor: '', ativo: true }
+const EMPTY_AFILIADO = {
+  nome: '', email: '', telefone: '', codigo: '',
+  comissao_tipo: 'porcentagem' as 'porcentagem' | 'valor_fixo', comissao_valor: '',
+  stripe_account_id: '', cpf_cnpj: '', chave_pix: '',
+  codigo_banco: '', banco: '', agencia: '', conta: '', tipo_conta: 'corrente' as 'corrente' | 'poupanca',
+  observacoes: '', ativo: true,
+}
 const EMPTY_CUPON = {
-  codigo: '', descricao: '', tipo_desconto: 'porcentagem' as const,
-  valor_desconto: '', validade: '', usos_maximos: '', ativo: true, afiliado_id: '',
+  cupom: '', tipo_desconto: 'porcentagem' as 'porcentagem' | 'valor_fixo',
+  valor: '', dias_validade: '', vezes_uso_maximo: '', ativo: true,
 }
 
 export default function Admin() {
@@ -809,8 +1040,8 @@ export default function Admin() {
   // ── Afiliados ──
   const [afiliados, setAfiliados] = useState<Afiliado[]>([])
   const [loadingAfil, setLoadingAfil] = useState(false)
-  const [showAfilDialog, setShowAfilDialog] = useState(false)
-  const [editingAfilId, setEditingAfilId] = useState<string | null>(null)
+  // afilDetailId: null = lista (cards); 'new' = criando; outro = editando aquele afiliado
+  const [afilDetailId, setAfilDetailId] = useState<string | null>(null)
   const [afilForm, setAfilForm] = useState(EMPTY_AFILIADO)
   const [savingAfil, setSavingAfil] = useState(false)
   const [deletingAfilId, setDeletingAfilId] = useState<string | null>(null)
@@ -819,10 +1050,10 @@ export default function Admin() {
   const [cupons, setCupons] = useState<Cupon[]>([])
   const [loadingCupons, setLoadingCupons] = useState(false)
   const [showCuponDialog, setShowCuponDialog] = useState(false)
-  const [editingCuponId, setEditingCuponId] = useState<string | null>(null)
+  const [editingCuponId, setEditingCuponId] = useState<number | null>(null)
   const [cuponForm, setCuponForm] = useState(EMPTY_CUPON)
   const [savingCupon, setSavingCupon] = useState(false)
-  const [deletingCuponId, setDeletingCuponId] = useState<string | null>(null)
+  const [deletingCuponId, setDeletingCuponId] = useState<number | null>(null)
 
   useEffect(() => { if (!loadingAdmin && !isAdmin) navigate('/') }, [isAdmin, loadingAdmin, navigate])
 
@@ -833,6 +1064,20 @@ export default function Admin() {
       .then((data) => { setSugestoes(data) })
       .catch(console.error)
       .finally(() => setLoadingSugestoes(false))
+  }, [isAdmin])
+
+  // Global Realtime: re-carrega ao chegar mensagem nova ou edição (unreadCount deriva de admin_leu_em)
+  useEffect(() => {
+    if (!isAdmin) return
+    const refetch = () => buscarTodasSugestoes().then(setSugestoes).catch(console.error)
+    const ch = supabase
+      .channel('admin-global-leitura')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sugestoes_plataforma' }, refetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'respostas_sugestoes' }, refetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'respostas_sugestoes' }, refetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reacoes_sugestoes' }, refetch)
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
   }, [isAdmin])
 
   // Signed URLs
@@ -876,21 +1121,39 @@ export default function Admin() {
     setSelectedId(id)
   }, [])
 
-  const handleSend = async (sugestaoId: string) => {
+  const handleSend = async (sugestaoId: string, respondeA: string | null = null) => {
     const texto = (replyTexts[sugestaoId] ?? '').trim()
     const files = replyFilesMap[sugestaoId] ?? []
     if (!texto && files.length === 0) return
     setSendingId(sugestaoId)
     try {
       const paths = files.length > 0 ? await uploadArquivosResposta(sugestaoId, files) : []
-      await responderSugestao(sugestaoId, texto, paths)
-      setAdminLastRead(sugestaoId)
+      await responderSugestao(sugestaoId, texto, paths, respondeA)
+      await marcarAdminLeu(sugestaoId)
       refreshBadges()
       setReplyTexts((p) => ({ ...p, [sugestaoId]: '' }))
       setReplyFilesMap((p) => ({ ...p, [sugestaoId]: [] }))
       setSugestoes(await buscarTodasSugestoes())
     } catch (err) { console.error(err) }
     finally { setSendingId(null) }
+  }
+
+  const handleReactAdmin = async (sugestaoId: string, mensagemId: string, emoji: string) => {
+    // Atualização otimista (sem delay)
+    setSugestoes((prev) => prev.map((s) => {
+      if (s.id !== sugestaoId) return s
+      const mine = s.reacoes.find((r) => r.mensagem_id === mensagemId && r.autor === 'admin')
+      let reacoes = s.reacoes.filter((r) => !(r.mensagem_id === mensagemId && r.autor === 'admin'))
+      if (!mine || mine.emoji !== emoji) {
+        reacoes = [...reacoes, { mensagem_id: mensagemId, autor: 'admin', emoji, created_at: new Date().toISOString() }]
+      }
+      return { ...s, reacoes }
+    }))
+    try {
+      await reagirAdmin(sugestaoId, mensagemId, emoji)
+    } catch {
+      buscarTodasSugestoes().then(setSugestoes).catch(console.error)
+    }
   }
 
   // Presença: fica "online" para clientes somente quando admin está na aba suporte
@@ -934,24 +1197,40 @@ export default function Admin() {
   }
 
   // ── Afiliado handlers ──
-  const openAddAfil = () => { setEditingAfilId(null); setAfilForm(EMPTY_AFILIADO); setShowAfilDialog(true) }
-  const openEditAfil = (a: Afiliado) => {
-    setEditingAfilId(a.id)
-    setAfilForm({ nome: a.nome, email: a.email ?? '', codigo: a.codigo, comissao_tipo: a.comissao_tipo, comissao_valor: String(a.comissao_valor), ativo: a.ativo })
-    setShowAfilDialog(true)
+  const openAddAfil = () => { setAfilForm(EMPTY_AFILIADO); setAfilDetailId('new') }
+  const openDetailAfil = (a: Afiliado) => {
+    setAfilForm({
+      nome: a.nome, email: a.email ?? '', telefone: a.telefone ?? '', codigo: a.codigo,
+      comissao_tipo: a.comissao_tipo, comissao_valor: String(a.comissao_valor),
+      stripe_account_id: a.stripe_account_id ?? '', cpf_cnpj: a.cpf_cnpj ?? '', chave_pix: a.chave_pix ?? '',
+      codigo_banco: a.codigo_banco ?? '', banco: a.banco ?? '', agencia: a.agencia ?? '',
+      conta: a.conta ?? '', tipo_conta: (a.tipo_conta === 'poupanca' ? 'poupanca' : 'corrente'),
+      observacoes: a.observacoes ?? '', ativo: a.ativo,
+    })
+    setAfilDetailId(a.id)
   }
   const saveAfil = async () => {
     if (!afilForm.nome || !afilForm.codigo) return
     setSavingAfil(true)
     try {
-      const p = { nome: afilForm.nome, email: afilForm.email || null, codigo: afilForm.codigo.toUpperCase(), comissao_tipo: afilForm.comissao_tipo, comissao_valor: Number(afilForm.comissao_valor) || 0, ativo: afilForm.ativo }
-      if (editingAfilId) await atualizarAfiliado(editingAfilId, p); else await criarAfiliado(p)
-      setAfiliados(await buscarAfiliados()); setShowAfilDialog(false)
+      const p = {
+        nome: afilForm.nome, email: afilForm.email || null, telefone: afilForm.telefone || null,
+        codigo: afilForm.codigo.toUpperCase(), comissao_tipo: afilForm.comissao_tipo,
+        comissao_valor: Number(afilForm.comissao_valor) || 0,
+        stripe_account_id: afilForm.stripe_account_id || null, cpf_cnpj: afilForm.cpf_cnpj || null,
+        chave_pix: afilForm.chave_pix || null, codigo_banco: afilForm.codigo_banco || null,
+        banco: afilForm.banco || null, agencia: afilForm.agencia || null, conta: afilForm.conta || null,
+        tipo_conta: afilForm.tipo_conta || null,
+        observacoes: afilForm.observacoes || null, ativo: afilForm.ativo,
+      }
+      if (afilDetailId && afilDetailId !== 'new') await atualizarAfiliado(afilDetailId, p)
+      else await criarAfiliado(p)
+      setAfiliados(await buscarAfiliados()); setAfilDetailId(null)
     } catch (err) { console.error(err) } finally { setSavingAfil(false) }
   }
   const deleteAfil = async (id: string) => {
     setDeletingAfilId(id)
-    try { await excluirAfiliado(id); setAfiliados((p) => p.filter((a) => a.id !== id)) }
+    try { await excluirAfiliado(id); setAfiliados((p) => p.filter((a) => a.id !== id)); setAfilDetailId(null) }
     catch (err) { console.error(err) } finally { setDeletingAfilId(null) }
   }
 
@@ -960,32 +1239,32 @@ export default function Admin() {
   const openEditCupon = (c: Cupon) => {
     setEditingCuponId(c.id)
     setCuponForm({
-      codigo: c.codigo, descricao: c.descricao ?? '', tipo_desconto: c.tipo_desconto,
-      valor_desconto: String(c.valor_desconto), validade: c.validade ?? '',
-      usos_maximos: c.usos_maximos != null ? String(c.usos_maximos) : '',
-      ativo: c.ativo, afiliado_id: c.afiliado_id ?? '',
+      cupom: c.cupom,
+      tipo_desconto: c.tipo_desconto,
+      valor: String(c.tipo_desconto === 'porcentagem' ? (c.porcentagem_desconto ?? '') : (c.valor_desconto ?? '')),
+      dias_validade: c.dias_validade != null ? String(c.dias_validade) : '',
+      vezes_uso_maximo: String(c.vezes_uso_maximo),
+      ativo: c.ativo,
     })
     setShowCuponDialog(true)
   }
   const saveCupon = async () => {
-    if (!cuponForm.codigo || !cuponForm.valor_desconto) return
+    if (!cuponForm.cupom || !cuponForm.valor) return
     setSavingCupon(true)
     try {
       const p = {
-        codigo: cuponForm.codigo.toUpperCase(),
-        descricao: cuponForm.descricao || null,
+        cupom: cuponForm.cupom.toUpperCase(),
         tipo_desconto: cuponForm.tipo_desconto,
-        valor_desconto: Number(cuponForm.valor_desconto),
-        validade: cuponForm.validade || null,
-        usos_maximos: cuponForm.usos_maximos ? Number(cuponForm.usos_maximos) : null,
+        valor: Number(cuponForm.valor),
+        dias_validade: cuponForm.dias_validade ? Number(cuponForm.dias_validade) : null,
+        vezes_uso_maximo: cuponForm.vezes_uso_maximo ? Number(cuponForm.vezes_uso_maximo) : null,
         ativo: cuponForm.ativo,
-        afiliado_id: cuponForm.afiliado_id || null,
       }
       if (editingCuponId) await atualizarCupon(editingCuponId, p); else await criarCupon(p)
       setCupons(await buscarCupons()); setShowCuponDialog(false)
     } catch (err) { console.error(err) } finally { setSavingCupon(false) }
   }
-  const deleteCupon = async (id: string) => {
+  const deleteCupon = async (id: number) => {
     setDeletingCuponId(id)
     try { await excluirCupon(id); setCupons((p) => p.filter((c) => c.id !== id)) }
     catch (err) { console.error(err) } finally { setDeletingCuponId(null) }
@@ -1053,9 +1332,14 @@ export default function Admin() {
                   onReplyTextChange={(v) => setReplyTexts((p) => ({ ...p, [selectedId!]: v }))}
                   onReplyFilesChange={(files) => setReplyFilesMap((p) => ({ ...p, [selectedId!]: files }))}
                   onRemoveFile={(idx) => setReplyFilesMap((p) => ({ ...p, [selectedId!]: (p[selectedId!] ?? []).filter((_, i) => i !== idx) }))}
-                  onSend={() => handleSend(selectedId!)}
+                  onSend={(respondeA) => handleSend(selectedId!, respondeA)}
                   onRefresh={() => buscarTodasSugestoes().then(setSugestoes).catch(console.error)}
-                  onRead={refreshBadges}
+                  onRead={() => {
+                    const nowIso = new Date().toISOString()
+                    setSugestoes((prev) => prev.map((x) => (x.id === selectedId ? { ...x, admin_leu_em: nowIso } : x)))
+                    refreshBadges()
+                  }}
+                  onReact={(mensagemId, emoji) => handleReactAdmin(selectedId!, mensagemId, emoji)}
                 />
               ) : (
                 <div className="h-full flex flex-col items-center justify-center gap-2" style={{ background: WA_BG }}>
@@ -1128,36 +1412,29 @@ export default function Admin() {
               ) : (
                 <CrudTable>
                   <thead>
-                    <tr>{['Código','Desconto','Validade','Usos','Afiliado','Ativo',''].map((h) => <Th key={h}>{h}</Th>)}</tr>
+                    <tr>{['Código','Desconto','Validade','Usos','Ativo',''].map((h) => <Th key={h}>{h}</Th>)}</tr>
                   </thead>
                   <tbody>
-                    {cupons.map((c) => {
-                      const vencido = c.validade && new Date(c.validade) < new Date()
-                      return (
-                        <tr key={c.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
-                          <Td>
-                            <span className="font-mono font-semibold text-[13px] bg-gray-100 px-2 py-0.5 rounded text-gray-800">
-                              {c.codigo}
-                            </span>
-                          </Td>
-                          <Td className="font-semibold text-emerald-700">{fmtDesconto(c)}</Td>
-                          <Td>
-                            {c.validade ? (
-                              <span className={cn('text-[13px]', vencido ? 'text-red-500' : 'text-gray-600')}>
-                                {format(new Date(c.validade + 'T12:00:00'), 'dd/MM/yyyy', { locale: ptBR })}
-                                {vencido && ' (vencido)'}
-                              </span>
-                            ) : <span className="text-gray-400 text-[13px]">Sem limite</span>}
-                          </Td>
-                          <Td className="text-[13px] text-gray-600">
-                            {c.usos_atuais}{c.usos_maximos != null ? `/${c.usos_maximos}` : ''}
-                          </Td>
-                          <Td className="text-[13px] text-gray-500">{c.afiliado_nome ?? '—'}</Td>
-                          <Td><BadgeBool v={c.ativo} /></Td>
-                          <Td><RowActions onEdit={() => openEditCupon(c)} onDelete={() => deleteCupon(c.id)} deleting={deletingCuponId === c.id} /></Td>
-                        </tr>
-                      )
-                    })}
+                    {cupons.map((c) => (
+                      <tr key={c.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                        <Td>
+                          <span className="font-mono font-semibold text-[13px] bg-gray-100 px-2 py-0.5 rounded text-gray-800">
+                            {c.cupom}
+                          </span>
+                        </Td>
+                        <Td className="font-semibold text-emerald-700">{fmtDesconto(c)}</Td>
+                        <Td>
+                          {c.dias_validade != null ? (
+                            <span className="text-[13px] text-gray-600">{c.dias_validade} dias</span>
+                          ) : <span className="text-gray-400 text-[13px]">Sem limite</span>}
+                        </Td>
+                        <Td className="text-[13px] text-gray-600">
+                          {c.vezes_usado}/{c.vezes_uso_maximo ?? '∞'}
+                        </Td>
+                        <Td><BadgeBool v={c.ativo} /></Td>
+                        <Td><RowActions onEdit={() => openEditCupon(c)} onDelete={() => deleteCupon(c.id)} deleting={deletingCuponId === c.id} /></Td>
+                      </tr>
+                    ))}
                   </tbody>
                 </CrudTable>
               )}
@@ -1168,47 +1445,63 @@ export default function Admin() {
         {/* ── AFILIADOS ── */}
         {activeTab === 'afiliados' && (
           <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
-            <div className="max-w-3xl mx-auto">
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2">
-                  <Users className="h-5 w-5 text-gray-500" />
-                  <h2 className="text-base font-semibold text-gray-800">Afiliados</h2>
+            {afilDetailId ? (
+              <AfiliadoDetalhe
+                novo={afilDetailId === 'new'}
+                form={afilForm}
+                setForm={setAfilForm}
+                saving={savingAfil}
+                deleting={deletingAfilId === afilDetailId}
+                onSave={saveAfil}
+                onBack={() => setAfilDetailId(null)}
+                onDelete={afilDetailId !== 'new' ? () => deleteAfil(afilDetailId) : undefined}
+              />
+            ) : (
+              <div className="max-w-4xl mx-auto">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-5 w-5 text-gray-500" />
+                    <h2 className="text-base font-semibold text-gray-800">Afiliados</h2>
+                  </div>
+                  <Button size="sm" onClick={openAddAfil}><Plus className="h-4 w-4 mr-1" /> Novo afiliado</Button>
                 </div>
-                <Button size="sm" onClick={openAddAfil}><Plus className="h-4 w-4 mr-1" /> Novo afiliado</Button>
-              </div>
-              {loadingAfil ? (
-                <p className="text-center py-12 text-sm text-gray-400">Carregando…</p>
-              ) : afiliados.length === 0 ? (
-                <div className="text-center py-16 text-gray-400">
-                  <Users className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                  <p className="text-sm">Nenhum afiliado cadastrado.</p>
-                </div>
-              ) : (
-                <CrudTable>
-                  <thead>
-                    <tr>{['Nome','Email','Código','Comissão','Ativo',''].map((h) => <Th key={h}>{h}</Th>)}</tr>
-                  </thead>
-                  <tbody>
+                {loadingAfil ? (
+                  <p className="text-center py-12 text-sm text-gray-400">Carregando…</p>
+                ) : afiliados.length === 0 ? (
+                  <div className="text-center py-16 text-gray-400">
+                    <Users className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">Nenhum afiliado cadastrado.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {afiliados.map((a) => (
-                      <tr key={a.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
-                        <Td className="font-medium text-gray-800">{a.nome}</Td>
-                        <Td className="text-gray-500 text-[13px]">{a.email ?? '—'}</Td>
-                        <Td>
-                          <span className="font-mono text-[13px] bg-violet-50 text-violet-700 px-2 py-0.5 rounded font-semibold">
-                            {a.codigo}
+                      <button
+                        key={a.id}
+                        onClick={() => openDetailAfil(a)}
+                        className="text-left bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md hover:border-violet-300 transition-all"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={cn('h-11 w-11 rounded-full flex items-center justify-center text-white text-sm font-semibold shrink-0', avatarColor(a.nome))}>
+                            {initials(a.nome, a.email)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-gray-800 truncate">{a.nome}</p>
+                            <p className="text-[12px] text-gray-500 truncate">{a.email ?? a.telefone ?? '—'}</p>
+                          </div>
+                          {!a.ativo && <span className="text-[10px] text-gray-400 shrink-0">inativo</span>}
+                        </div>
+                        <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+                          <span className="font-mono text-[12px] bg-violet-50 text-violet-700 px-2 py-0.5 rounded font-semibold">{a.codigo}</span>
+                          <span className="text-[13px] font-semibold text-gray-700">
+                            {a.comissao_tipo === 'porcentagem' ? `${a.comissao_valor}%` : `R$ ${Number(a.comissao_valor).toFixed(2)}`}
                           </span>
-                        </Td>
-                        <Td className="font-semibold text-gray-700">
-                          {a.comissao_tipo === 'porcentagem' ? `${a.comissao_valor}%` : `R$ ${Number(a.comissao_valor).toFixed(2)}`}
-                        </Td>
-                        <Td><BadgeBool v={a.ativo} /></Td>
-                        <Td><RowActions onEdit={() => openEditAfil(a)} onDelete={() => deleteAfil(a.id)} deleting={deletingAfilId === a.id} /></Td>
-                      </tr>
+                        </div>
+                      </button>
                     ))}
-                  </tbody>
-                </CrudTable>
-              )}
-            </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1254,73 +1547,19 @@ export default function Admin() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Dialog: Afiliado ── */}
-      <Dialog open={showAfilDialog} onOpenChange={setShowAfilDialog}>
-        <DialogContent className="sm:max-w-[420px] rounded-xl">
-          <DialogHeader><DialogTitle>{editingAfilId ? 'Editar afiliado' : 'Novo afiliado'}</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-1">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-[13px]">Nome *</Label>
-                <Input value={afilForm.nome} onChange={(e) => setAfilForm((p) => ({ ...p, nome: e.target.value }))} placeholder="João Silva" className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-[13px]">E-mail</Label>
-                <Input type="email" value={afilForm.email} onChange={(e) => setAfilForm((p) => ({ ...p, email: e.target.value }))} placeholder="joao@email.com" className="mt-1" />
-              </div>
-            </div>
-            <div>
-              <Label className="text-[13px]">Código único *</Label>
-              <Input value={afilForm.codigo} onChange={(e) => setAfilForm((p) => ({ ...p, codigo: e.target.value.toUpperCase() }))} placeholder="JOAO10" className="mt-1 font-mono" />
-              <p className="text-[11px] text-gray-400 mt-1">Será convertido para maiúsculas automaticamente.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-[13px]">Tipo comissão</Label>
-                <Select value={afilForm.comissao_tipo} onValueChange={(v) => setAfilForm((p) => ({ ...p, comissao_tipo: v as any }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="porcentagem">Porcentagem (%)</SelectItem>
-                    <SelectItem value="valor_fixo">Valor fixo (R$)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-[13px]">Valor comissão</Label>
-                <Input type="number" value={afilForm.comissao_valor} onChange={(e) => setAfilForm((p) => ({ ...p, comissao_valor: e.target.value }))} placeholder={afilForm.comissao_tipo === 'porcentagem' ? '10' : '50'} className="mt-1" />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <input type="checkbox" id="afil-ativo" checked={afilForm.ativo} onChange={(e) => setAfilForm((p) => ({ ...p, ativo: e.target.checked }))} className="h-4 w-4 rounded border-gray-300 accent-blue-600" />
-              <Label htmlFor="afil-ativo" className="text-[13px] cursor-pointer">Ativo</Label>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAfilDialog(false)}>Cancelar</Button>
-            <Button onClick={saveAfil} disabled={savingAfil || !afilForm.nome || !afilForm.codigo}>{savingAfil ? 'Salvando…' : 'Salvar'}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* ── Dialog: Cupom ── */}
       <Dialog open={showCuponDialog} onOpenChange={setShowCuponDialog}>
         <DialogContent className="sm:max-w-[480px] rounded-xl">
           <DialogHeader><DialogTitle>{editingCuponId ? 'Editar cupom' : 'Novo cupom'}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-1">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-[13px]">Código *</Label>
-                <Input value={cuponForm.codigo} onChange={(e) => setCuponForm((p) => ({ ...p, codigo: e.target.value.toUpperCase() }))} placeholder="DESC20" className="mt-1 font-mono" />
-              </div>
-              <div>
-                <Label className="text-[13px]">Descrição</Label>
-                <Input value={cuponForm.descricao} onChange={(e) => setCuponForm((p) => ({ ...p, descricao: e.target.value }))} placeholder="20% de desconto" className="mt-1" />
-              </div>
+            <div>
+              <Label className="text-[13px]">Código *</Label>
+              <Input value={cuponForm.cupom} onChange={(e) => setCuponForm((p) => ({ ...p, cupom: e.target.value.toUpperCase() }))} placeholder="DESC20" className="mt-1 font-mono" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-[13px]">Tipo desconto</Label>
-                <Select value={cuponForm.tipo_desconto} onValueChange={(v) => setCuponForm((p) => ({ ...p, tipo_desconto: v as any }))}>
+                <Select value={cuponForm.tipo_desconto} onValueChange={(v) => setCuponForm((p) => ({ ...p, tipo_desconto: v as 'porcentagem' | 'valor_fixo' }))}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="porcentagem">Porcentagem (%)</SelectItem>
@@ -1330,32 +1569,20 @@ export default function Admin() {
               </div>
               <div>
                 <Label className="text-[13px]">Valor *</Label>
-                <Input type="number" value={cuponForm.valor_desconto} onChange={(e) => setCuponForm((p) => ({ ...p, valor_desconto: e.target.value }))} placeholder={cuponForm.tipo_desconto === 'porcentagem' ? '20' : '50'} className="mt-1" />
+                <Input type="number" value={cuponForm.valor} onChange={(e) => setCuponForm((p) => ({ ...p, valor: e.target.value }))} placeholder={cuponForm.tipo_desconto === 'porcentagem' ? '20' : '50'} className="mt-1" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-[13px]">Data de validade</Label>
-                <Input type="date" value={cuponForm.validade} onChange={(e) => setCuponForm((p) => ({ ...p, validade: e.target.value }))} className="mt-1" />
-                <p className="text-[11px] text-gray-400 mt-1">Vazio = sem expiração</p>
+                <Label className="text-[13px]">Validade (dias)</Label>
+                <Input type="number" value={cuponForm.dias_validade} onChange={(e) => setCuponForm((p) => ({ ...p, dias_validade: e.target.value }))} placeholder="30" className="mt-1" />
+                <p className="text-[11px] text-gray-400 mt-1">Vazio = sem limite</p>
               </div>
               <div>
                 <Label className="text-[13px]">Usos máximos</Label>
-                <Input type="number" value={cuponForm.usos_maximos} onChange={(e) => setCuponForm((p) => ({ ...p, usos_maximos: e.target.value }))} placeholder="100" className="mt-1" />
+                <Input type="number" value={cuponForm.vezes_uso_maximo} onChange={(e) => setCuponForm((p) => ({ ...p, vezes_uso_maximo: e.target.value }))} placeholder="Ilimitado" className="mt-1" />
                 <p className="text-[11px] text-gray-400 mt-1">Vazio = ilimitado</p>
               </div>
-            </div>
-            <div>
-              <Label className="text-[13px]">Afiliado (opcional)</Label>
-              <Select value={cuponForm.afiliado_id} onValueChange={(v) => setCuponForm((p) => ({ ...p, afiliado_id: v === '__none__' ? '' : v }))}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Nenhum" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Nenhum</SelectItem>
-                  {afiliados.filter((a) => a.ativo).map((a) => (
-                    <SelectItem key={a.id} value={a.id}>{a.nome} ({a.codigo})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
             <div className="flex items-center gap-2">
               <input type="checkbox" id="cupon-ativo" checked={cuponForm.ativo} onChange={(e) => setCuponForm((p) => ({ ...p, ativo: e.target.checked }))} className="h-4 w-4 rounded border-gray-300 accent-blue-600" />
@@ -1364,10 +1591,140 @@ export default function Admin() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCuponDialog(false)}>Cancelar</Button>
-            <Button onClick={saveCupon} disabled={savingCupon || !cuponForm.codigo || !cuponForm.valor_desconto}>{savingCupon ? 'Salvando…' : 'Salvar'}</Button>
+            <Button onClick={saveCupon} disabled={savingCupon || !cuponForm.cupom || !cuponForm.valor}>{savingCupon ? 'Salvando…' : 'Salvar'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+// ── AfiliadoDetalhe (tela de detalhe/edição — não é popup) ─────────────────────
+type AfilForm = typeof EMPTY_AFILIADO
+function Campo({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <Label className="text-[13px]">{label}</Label>
+      {children}
+    </div>
+  )
+}
+function AfiliadoDetalhe({ novo, form, setForm, saving, deleting, onSave, onBack, onDelete }: {
+  novo: boolean
+  form: AfilForm
+  setForm: React.Dispatch<React.SetStateAction<AfilForm>>
+  saving: boolean
+  deleting: boolean
+  onSave: () => void
+  onBack: () => void
+  onDelete?: () => void
+}) {
+  const set = (patch: Partial<AfilForm>) => setForm((p) => ({ ...p, ...patch }))
+  return (
+    <div className="max-w-2xl mx-auto">
+      <div className="flex items-center justify-between mb-5">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900">
+          <ArrowLeft className="h-4 w-4" /> Voltar
+        </button>
+        {onDelete && (
+          <Button variant="outline" size="sm" onClick={onDelete} disabled={deleting}
+            className="text-red-600 border-red-200 hover:bg-red-50">
+            <Trash2 className="h-4 w-4 mr-1" /> {deleting ? 'Excluindo…' : 'Excluir'}
+          </Button>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
+        <div className="flex items-center gap-3">
+          <div className={cn('h-14 w-14 rounded-full flex items-center justify-center text-white text-lg font-semibold shrink-0', avatarColor(form.nome || '?'))}>
+            {initials(form.nome || '?', form.email)}
+          </div>
+          <h2 className="text-lg font-semibold text-gray-800">{novo ? 'Novo afiliado' : (form.nome || 'Afiliado')}</h2>
+        </div>
+
+        {/* Dados */}
+        <div>
+          <p className="text-[11px] font-semibold text-gray-400 uppercase mb-2">Dados</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Campo label="Nome *"><Input value={form.nome} onChange={(e) => set({ nome: e.target.value })} placeholder="João Silva" className="mt-1" /></Campo>
+            <Campo label="Código único *"><Input value={form.codigo} onChange={(e) => set({ codigo: e.target.value.toUpperCase() })} placeholder="JOAO10" className="mt-1 font-mono" /></Campo>
+            <Campo label="E-mail"><Input type="email" value={form.email} onChange={(e) => set({ email: e.target.value })} placeholder="joao@email.com" className="mt-1" /></Campo>
+            <Campo label="Telefone"><Input value={form.telefone} onChange={(e) => set({ telefone: e.target.value })} placeholder="(11) 90000-0000" className="mt-1" /></Campo>
+          </div>
+          <div className="flex items-center gap-2 mt-3">
+            <input type="checkbox" id="afil-ativo" checked={form.ativo} onChange={(e) => set({ ativo: e.target.checked })} className="h-4 w-4 rounded border-gray-300 accent-blue-600" />
+            <Label htmlFor="afil-ativo" className="text-[13px] cursor-pointer">Ativo</Label>
+          </div>
+        </div>
+
+        {/* Comissão */}
+        <div>
+          <p className="text-[11px] font-semibold text-gray-400 uppercase mb-2">Comissão por venda</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Campo label="Tipo">
+              <Select value={form.comissao_tipo} onValueChange={(v) => set({ comissao_tipo: v as 'porcentagem' | 'valor_fixo' })}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="porcentagem">Porcentagem (%)</SelectItem>
+                  <SelectItem value="valor_fixo">Valor fixo (R$)</SelectItem>
+                </SelectContent>
+              </Select>
+            </Campo>
+            <Campo label={form.comissao_tipo === 'porcentagem' ? '% por venda' : 'R$ por venda'}>
+              <Input type="number" value={form.comissao_valor} onChange={(e) => set({ comissao_valor: e.target.value })} placeholder={form.comissao_tipo === 'porcentagem' ? '10' : '50'} className="mt-1" />
+            </Campo>
+          </div>
+        </div>
+
+        {/* Pagamento via Stripe */}
+        <div>
+          <p className="text-[11px] font-semibold text-gray-400 uppercase mb-2">Pagamento (Stripe)</p>
+          <div className="space-y-3">
+            <Campo label="Stripe Connect Account ID">
+              <Input value={form.stripe_account_id} onChange={(e) => set({ stripe_account_id: e.target.value })} placeholder="acct_1AbC..." className="mt-1 font-mono" />
+              <p className="text-[11px] text-gray-400 mt-1">Conta conectada do afiliado — usada para depositar a comissão via transferência.</p>
+            </Campo>
+            <Campo label="CPF ou CNPJ"><Input value={form.cpf_cnpj} onChange={(e) => set({ cpf_cnpj: e.target.value })} placeholder="000.000.000-00" className="mt-1" /></Campo>
+          </div>
+        </div>
+
+        {/* Conta bancária (Brasil) */}
+        <div>
+          <p className="text-[11px] font-semibold text-gray-400 uppercase mb-2">Conta bancária</p>
+          <div className="space-y-3">
+            <Campo label="Chave PIX"><Input value={form.chave_pix} onChange={(e) => set({ chave_pix: e.target.value })} placeholder="CPF, e-mail, telefone…" className="mt-1" /></Campo>
+            <div className="grid grid-cols-2 gap-3">
+              <Campo label="Banco (nome)"><Input value={form.banco} onChange={(e) => set({ banco: e.target.value })} placeholder="Nubank" className="mt-1" /></Campo>
+              <Campo label="Código do banco"><Input value={form.codigo_banco} onChange={(e) => set({ codigo_banco: e.target.value })} placeholder="260" className="mt-1 font-mono" /></Campo>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <Campo label="Agência"><Input value={form.agencia} onChange={(e) => set({ agencia: e.target.value })} placeholder="0001" className="mt-1" /></Campo>
+              <Campo label="Conta"><Input value={form.conta} onChange={(e) => set({ conta: e.target.value })} placeholder="12345-6" className="mt-1" /></Campo>
+              <Campo label="Tipo">
+                <Select value={form.tipo_conta} onValueChange={(v) => set({ tipo_conta: v as 'corrente' | 'poupanca' })}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="corrente">Corrente</SelectItem>
+                    <SelectItem value="poupanca">Poupança</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Campo>
+            </div>
+            <p className="text-[11px] text-gray-400">O Stripe (Brasil) exige conta corrente no mesmo CPF/CNPJ do titular para receber os repasses.</p>
+          </div>
+        </div>
+
+        {/* Observações */}
+        <Campo label="Observações">
+          <textarea value={form.observacoes} onChange={(e) => set({ observacoes: e.target.value })} rows={3}
+            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/30" placeholder="Anotações internas…" />
+        </Campo>
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+          <Button variant="outline" onClick={onBack}>Cancelar</Button>
+          <Button onClick={onSave} disabled={saving || !form.nome || !form.codigo}>{saving ? 'Salvando…' : 'Salvar'}</Button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { RestaurantTab } from './settings/RestaurantTab'
 import { MascotTab } from './settings/MascotTab'
 import { CategoriesTab } from './settings/CategoriesTab'
 import { WaitersTab } from './settings/WaitersTab'
+import { WhatsAppTab } from './settings/WhatsAppTab'
 import { useUserProfile } from '@/hooks/use-user-profile'
 import { cn } from '@/lib/utils'
 
@@ -71,6 +72,7 @@ export default function Settings() {
 
   const navItems = [
     { id: 'restaurante', label: 'Restaurante' },
+    { id: 'whatsapp', label: 'WhatsApp' },
     { id: 'mascote', label: 'Assistente de IA' },
     { id: 'categorias', label: 'Categorias de Feedback' },
     { id: 'garcons', label: 'Garçons' },
@@ -118,6 +120,9 @@ export default function Settings() {
             <div className="flex-1 space-y-16 pb-32 w-full min-w-0">
               <section id="restaurante" className="scroll-mt-28">
                 <RestaurantTab restauranteId={profile.restaurante_id} />
+              </section>
+              <section id="whatsapp" className="scroll-mt-28">
+                <WhatsAppTab restauranteId={profile.restaurante_id} />
               </section>
               <section id="mascote" className="scroll-mt-28">
                 <MascotTab restauranteId={profile.restaurante_id} />

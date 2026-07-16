@@ -2,6 +2,7 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  ReferenceLine,
   XAxis,
   YAxis,
 } from 'recharts'
@@ -116,13 +117,21 @@ export function TrendChart({ data, categories, period, onPeriodChange }: TrendCh
                 interval={xInterval}
                 dy={10}
               />
-              <YAxis axisLine={false} tickLine={false} domain={[0, 100]} hide />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                domain={[0, 100]}
+                ticks={[0, 25, 50, 75, 100]}
+                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                tickFormatter={(v) => `${v}`}
+              />
+              <ReferenceLine y={50} stroke="hsl(var(--border))" strokeDasharray="4 2" strokeOpacity={0.7} />
               <ChartTooltip content={<SentimentTooltip />} />
               <Area
                 type="monotone"
                 dataKey="sentiment"
                 stroke="hsl(var(--chart-1))"
-                strokeWidth={3}
+                strokeWidth={2.5}
                 fillOpacity={1}
                 fill="url(#colorSentiment)"
                 animationDuration={1000}

@@ -6,6 +6,26 @@ export interface RespostaAdmin {
   autor: string
   arquivos: string[]
   created_at: string
+  responde_a: string | null
+}
+
+export interface ReacaoAdmin {
+  mensagem_id: string
+  autor: 'cliente' | 'admin'
+  emoji: string
+  created_at: string
+}
+
+export interface PerfilRestaurante {
+  nome: string | null
+  email: string | null
+  avatar_url: string | null
+  nome_restaurante: string | null
+  logo_url: string | null
+  numero_whatsapp: string | null
+  tipo_culinaria: string | null
+  numero_mesas: number | null
+  detalhes: string | null
 }
 
 export interface SugestaoAdmin {
@@ -20,7 +40,9 @@ export interface SugestaoAdmin {
   usuario_email: string | null
   admin_leu_em: string | null
   cliente_leu_em: string | null
+  perfil: PerfilRestaurante | null
   respostas: RespostaAdmin[]
+  reacoes: ReacaoAdmin[]
 }
 
 export interface DivisaoReceita {
@@ -39,7 +61,8 @@ export async function buscarTodasSugestoes(): Promise<SugestaoAdmin[]> {
     .select(`
       id, texto, titulo, arquivos, status, created_at, usuario_id,
       admin_leu_em, cliente_leu_em,
-      respostas_sugestoes (id, texto, autor, arquivos, created_at)
+      respostas_sugestoes (id, texto, autor, arquivos, created_at, responde_a),
+      reacoes_sugestoes (mensagem_id, autor, emoji, created_at)
     `)
     .order('created_at', { ascending: false })
 
@@ -50,13 +73,23 @@ export async function buscarTodasSugestoes(): Promise<SugestaoAdmin[]> {
 
   const { data: restaurantes } = await supabase
     .from('restaurantes')
-    .select('auth_user_id, nome, email')
+    .select('auth_user_id, nome, email, avatar_url, nome_restaurante, logo_url, numero_whatsapp, tipo_culinaria, numero_mesas, detalhes')
     .in('auth_user_id', usuarioIds)
 
-  const userMap: Record<string, { nome: string | null; email: string | null }> = {}
+  const userMap: Record<string, PerfilRestaurante> = {}
   for (const r of restaurantes ?? []) {
     if (r.auth_user_id) {
-      userMap[r.auth_user_id] = { nome: r.nome ?? null, email: r.email ?? null }
+      userMap[r.auth_user_id] = {
+        nome: r.nome ?? null,
+        email: r.email ?? null,
+        avatar_url: r.avatar_url ?? null,
+        nome_restaurante: r.nome_restaurante ?? null,
+        logo_url: r.logo_url ?? null,
+        numero_whatsapp: r.numero_whatsapp ?? null,
+        tipo_culinaria: r.tipo_culinaria ?? null,
+        numero_mesas: r.numero_mesas ?? null,
+        detalhes: r.detalhes ?? null,
+      }
     }
   }
 
@@ -70,6 +103,7 @@ export async function buscarTodasSugestoes(): Promise<SugestaoAdmin[]> {
     usuario_id: s.usuario_id,
     usuario_nome: userMap[s.usuario_id]?.nome ?? null,
     usuario_email: userMap[s.usuario_id]?.email ?? null,
+    perfil: userMap[s.usuario_id] ?? null,
     admin_leu_em: s.admin_leu_em ?? null,
     cliente_leu_em: s.cliente_leu_em ?? null,
     respostas: ((s.respostas_sugestoes ?? []) as any[])
@@ -80,7 +114,9 @@ export async function buscarTodasSugestoes(): Promise<SugestaoAdmin[]> {
         autor: r.autor,
         arquivos: Array.isArray(r.arquivos) ? r.arquivos : [],
         created_at: r.created_at,
+        responde_a: r.responde_a ?? null,
       })),
+    reacoes: (s.reacoes_sugestoes ?? []) as ReacaoAdmin[],
   }))
 }
 
@@ -88,11 +124,13 @@ export async function responderSugestao(
   sugestaoId: string,
   texto: string,
   arquivoPaths: string[],
+  respondeA: string | null = null,
 ): Promise<void> {
   const { error } = await supabase.from('respostas_sugestoes').insert({
     sugestao_id: sugestaoId,
     texto,
     arquivos: arquivoPaths,
+    responde_a: respondeA,
   })
   if (error) throw error
 }
@@ -101,10 +139,11 @@ export async function editarRespostaAdmin(
   id: string,
   texto: string,
   arquivos: string[],
+  respondeA: string | null = null,
 ): Promise<void> {
   const { error } = await supabase
     .from('respostas_sugestoes')
-    .update({ texto, arquivos })
+    .update({ texto, arquivos, responde_a: respondeA })
     .eq('id', id)
   if (error) throw error
 }
@@ -148,10 +187,50 @@ export async function buscarTotalNaoLidas(): Promise<number> {
   return total
 }
 
+export async function reagirAdmin(
+  sugestaoId: string,
+  mensagemId: string,
+  emoji: string,
+): Promise<void> {
+  const { data: existing } = await supabase
+    .from('reacoes_sugestoes')
+    .select('id, emoji')
+    .eq('mensagem_id', mensagemId)
+    .eq('autor', 'admin')
+    .maybeSingle()
+
+  if (existing) {
+    if (existing.emoji === emoji) {
+      await supabase.from('reacoes_sugestoes').delete().eq('id', existing.id)
+    } else {
+      // Bumpa created_at: reagir/trocar é a ação mais recente
+      await supabase
+        .from('reacoes_sugestoes')
+        .update({ emoji, created_at: new Date().toISOString() })
+        .eq('id', existing.id)
+    }
+  } else {
+    await supabase.from('reacoes_sugestoes').insert({
+      sugestao_id: sugestaoId,
+      mensagem_id: mensagemId,
+      autor: 'admin',
+      emoji,
+    })
+  }
+}
+
 export async function marcarAdminLeu(sugestaoId: string): Promise<void> {
   await supabase
     .from('sugestoes_plataforma')
     .update({ admin_leu_em: new Date().toISOString() })
+    .eq('id', sugestaoId)
+}
+
+export async function resetClienteLeu(sugestaoId: string, beforeTime: string): Promise<void> {
+  const rollbackTo = new Date(new Date(beforeTime).getTime() - 1).toISOString()
+  await supabase
+    .from('sugestoes_plataforma')
+    .update({ cliente_leu_em: rollbackTo })
     .eq('id', sugestaoId)
 }
 
@@ -175,9 +254,20 @@ export interface Afiliado {
   id: string
   nome: string
   email: string | null
+  telefone: string | null
   codigo: string
   comissao_tipo: 'porcentagem' | 'valor_fixo'
   comissao_valor: number
+  // Dados para payout via Stripe (Brasil)
+  stripe_account_id: string | null
+  cpf_cnpj: string | null
+  chave_pix: string | null
+  codigo_banco: string | null
+  banco: string | null
+  agencia: string | null
+  conta: string | null
+  tipo_conta: string | null
+  observacoes: string | null
   ativo: boolean
   created_at: string
 }
@@ -212,49 +302,69 @@ export async function excluirAfiliado(id: string): Promise<void> {
 // ── Cupons ────────────────────────────────────────────────────────────────────
 
 export interface Cupon {
-  id: string
-  codigo: string
-  descricao: string | null
+  id: number
+  cupom: string
   tipo_desconto: 'porcentagem' | 'valor_fixo'
-  valor_desconto: number
-  validade: string | null
-  usos_maximos: number | null
-  usos_atuais: number
+  porcentagem_desconto: number | null
+  valor_desconto: number | null
+  dias_validade: number | null
+  vezes_uso_maximo: number | null
+  vezes_usado: number
   ativo: boolean
-  afiliado_id: string | null
-  afiliado_nome?: string | null
   created_at: string
+}
+
+export type CuponInput = {
+  cupom: string
+  tipo_desconto: 'porcentagem' | 'valor_fixo'
+  valor: number
+  dias_validade: number | null
+  vezes_uso_maximo: number | null
+  ativo: boolean
 }
 
 export async function buscarCupons(): Promise<Cupon[]> {
   const { data, error } = await supabase
     .from('cupons')
-    .select('*, afiliados(nome)')
+    .select('*')
     .order('created_at', { ascending: false })
   if (error) throw error
   return ((data ?? []) as any[]).map((c) => ({
-    ...c,
-    afiliado_nome: c.afiliados?.nome ?? null,
-    afiliados: undefined,
+    id: c.id,
+    cupom: c.cupom ?? '',
+    tipo_desconto: (c.porcentagem_desconto != null ? 'porcentagem' : 'valor_fixo') as 'porcentagem' | 'valor_fixo',
+    porcentagem_desconto: c.porcentagem_desconto ?? null,
+    valor_desconto: c.valor_desconto ?? null,
+    dias_validade: c.dias_validade ?? null,
+    vezes_uso_maximo: c.vezes_uso_maximo ?? null,
+    vezes_usado: c.vezes_usado ?? 0,
+    ativo: c.ativo ?? true,
+    created_at: c.created_at,
   }))
 }
 
-export async function criarCupon(
-  input: Omit<Cupon, 'id' | 'created_at' | 'usos_atuais' | 'afiliado_nome'>,
-): Promise<void> {
-  const { error } = await supabase.from('cupons').insert(input)
+function cuponToRow(input: CuponInput) {
+  return {
+    cupom: input.cupom,
+    porcentagem_desconto: input.tipo_desconto === 'porcentagem' ? input.valor : null,
+    valor_desconto: input.tipo_desconto === 'valor_fixo' ? input.valor : null,
+    dias_validade: input.dias_validade,
+    vezes_uso_maximo: input.vezes_uso_maximo,
+    ativo: input.ativo,
+  }
+}
+
+export async function criarCupon(input: CuponInput): Promise<void> {
+  const { error } = await supabase.from('cupons').insert({ ...cuponToRow(input), vezes_usado: 0 })
   if (error) throw error
 }
 
-export async function atualizarCupon(
-  id: string,
-  input: Partial<Omit<Cupon, 'id' | 'created_at' | 'usos_atuais' | 'afiliado_nome'>>,
-): Promise<void> {
-  const { error } = await supabase.from('cupons').update(input).eq('id', id)
+export async function atualizarCupon(id: number, input: CuponInput): Promise<void> {
+  const { error } = await supabase.from('cupons').update(cuponToRow(input)).eq('id', id)
   if (error) throw error
 }
 
-export async function excluirCupon(id: string): Promise<void> {
+export async function excluirCupon(id: number): Promise<void> {
   const { error } = await supabase.from('cupons').delete().eq('id', id)
   if (error) throw error
 }

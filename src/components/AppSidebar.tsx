@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -20,6 +21,8 @@ import {
 import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
 import { getIniciais } from '@/lib/iniciais'
 import { usePermissoes } from '@/hooks/use-permissoes'
+import { buscarTotalNaoLidasCliente } from '@/lib/queries/sugestoes'
+import { supabase } from '@/lib/supabase/client'
 
 const navigation = [
   { name: 'Visão Geral', href: '/', icon: LayoutDashboard, modulo: 'visao_geral' },
@@ -36,6 +39,25 @@ export function AppSidebar() {
   const { podeVer } = usePermissoes()
 
   const isSugestoesActive = location.pathname === '/sugestoes'
+
+  // Badge de mensagens não lidas do suporte (novas + editadas)
+  const [naoLidas, setNaoLidas] = useState(0)
+  useEffect(() => {
+    const atualizar = () => buscarTotalNaoLidasCliente().then(setNaoLidas).catch(() => {})
+    atualizar()
+    const ch = supabase
+      .channel('sidebar-sugestoes-unread')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'respostas_sugestoes' }, atualizar)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'respostas_sugestoes' }, atualizar)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sugestoes_plataforma' }, atualizar)
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [])
+
+  // Zera na hora ao entrar na página de sugestões (a própria página marca como lido no banco)
+  useEffect(() => {
+    if (isSugestoesActive) setNaoLidas(0)
+  }, [isSugestoesActive])
 
   return (
     <Sidebar className="border-r border-border bg-white text-sidebar-foreground">
@@ -98,6 +120,11 @@ export function AppSidebar() {
         >
           <HelpCircle className="h-4 w-4 shrink-0" />
           <span>Sugestões e Dúvidas</span>
+          {naoLidas > 0 && !isSugestoesActive && (
+            <span className="ml-auto min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1 leading-none">
+              {naoLidas > 99 ? '99+' : naoLidas}
+            </span>
+          )}
         </Link>
       </SidebarFooter>
     </Sidebar>

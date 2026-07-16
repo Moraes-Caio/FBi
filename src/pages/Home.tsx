@@ -129,7 +129,10 @@ export default function HomePage() {
             <Star className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{data.kpis.sentiment}%</div>
+            <div className={`text-2xl font-bold flex items-baseline gap-1 ${data.kpis.sentiment >= 70 ? 'text-green-600' : data.kpis.sentiment >= 40 ? 'text-yellow-600' : 'text-red-500'}`}>
+              {data.kpis.sentiment}
+              <span className="text-sm font-normal text-muted-foreground">/100</span>
+            </div>
             <p className="text-xs text-muted-foreground">
               {data.kpis.sentimentTrend} em relação ao período anterior
             </p>

@@ -91,19 +91,24 @@ export const buscarKpis = async (restauranteId: number | null, periodo: PeriodIn
 
   const getSentimentScore = (arr: any[]) => {
     if (!arr.length) return 0
-    return Math.round((arr.filter(isPositivo).length / arr.length) * 100)
+    const pos = arr.filter(isPositivo).length
+    const neu = arr.filter((f) => {
+      const s = f.sentimento?.toLowerCase()
+      return s === 'neutro' || s === 'neutral'
+    }).length
+    return Math.round((pos * 100 + neu * 50) / arr.length)
   }
 
   const sentiment = getSentimentScore(currentFeedbacks)
   const prevSentiment = getSentimentScore(previousFeedbacks)
 
-  // Trend de sentimento: sem dados anteriores a comparação não tem sentido
+  // Trend de sentimento: diferença de pontos CSAT vs período anterior
   let sentimentTrend: string
   if (!hasPrevData) {
     sentimentTrend = totalFeedbacks > 0 ? 'novo' : '—'
   } else {
     const v = sentiment - prevSentiment
-    sentimentTrend = `${v >= 0 ? '+' : ''}${v}%`
+    sentimentTrend = v === 0 ? 'estável' : `${v >= 0 ? '+' : ''}${v} pts`
   }
 
   const getNpsScore = (arr: any[]) => {
@@ -172,7 +177,7 @@ export const buscarTendencia = async (restauranteId: number | null, periodo: Per
     else if (s === 'neutro' || s === 'neutral') b.neutral++
   }
 
-  // positivo=100, neutro=50, negativo=0 — mantém neutro no meio e negativo no fundo
+  // CSAT 0-100: positivo=100pts, neutro=50pts, negativo=0pts
   const calcSentiment = (b: Bucket): number | null =>
     b.total === 0 ? null : Math.round((b.positive * 100 + b.neutral * 50) / b.total)
 

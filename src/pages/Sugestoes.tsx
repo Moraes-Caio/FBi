@@ -3,7 +3,7 @@ import { format, isToday, isYesterday } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import {
   Send, Paperclip, X, Video, FileText, FileSpreadsheet,
-  ChevronDown, Pencil, Trash2, Check, Play,
+  Trash2, Check, Play,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/use-auth'
@@ -15,15 +15,21 @@ import {
   editarSugestao,
   editarResposta,
   excluirResposta,
-  excluirSugestao,
   excluirArquivosStorage,
   getSignedUrls,
   uploadArquivosSugestao,
   marcarClienteLeu,
+  resetAdminLeu,
+  reagirCliente,
   type Sugestao,
+  type Reacao,
 } from '@/lib/queries/sugestoes'
 import { supabase } from '@/lib/supabase/client'
 import { DoubleCheck } from '@/components/DoubleCheck'
+import { LinkifiedText } from '@/components/LinkifiedText'
+import { MessageMenu } from '@/components/MessageMenu'
+import { EmojiInputButton } from '@/components/EmojiPicker'
+import { QuoteBox, type QuoteInfo } from '@/components/QuoteBox'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const WA_TEAL = '#128C7E'
@@ -40,6 +46,7 @@ interface ThreadMsg {
   arquivos: string[]
   time: string
   tipo: 'sugestao' | 'resposta'
+  respondeA: string | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -83,16 +90,9 @@ function openInSystem(url: string, path: string) {
     .catch(console.error)
 }
 
-function getClientLastRead(id: string): number {
-  return parseInt(localStorage.getItem(`fib_client_${id}`) ?? '0', 10)
-}
-function setClientLastRead(id: string): void {
-  localStorage.setItem(`fib_client_${id}`, String(Date.now()))
-}
 
 function buildThread(s: Sugestao): ThreadMsg[] {
   const msgs: ThreadMsg[] = [
-    { id: s.id, texto: s.texto, role: 'eu', arquivos: s.arquivos, time: s.created_at, tipo: 'sugestao' },
     ...s.respostas.map((r) => ({
       id: r.id,
       texto: r.texto,
@@ -100,8 +100,13 @@ function buildThread(s: Sugestao): ThreadMsg[] {
       arquivos: r.arquivos,
       time: r.created_at,
       tipo: 'resposta' as const,
+      respondeA: r.responde_a ?? null,
     })),
   ]
+  // Mensagem raiz (a sugestão) só aparece se não foi "apagada" (texto + arquivos vazios)
+  if (s.texto || s.arquivos.length > 0) {
+    msgs.unshift({ id: s.id, texto: s.texto, role: 'eu', arquivos: s.arquivos, time: s.created_at, tipo: 'sugestao', respondeA: null })
+  }
   return msgs.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
 }
 
@@ -273,11 +278,13 @@ function ThumbNovo({ file, onRemove }: { file: File; onRemove: () => void }) {
 interface EditBubbleProps {
   msg: ThreadMsg
   signedUrls: Record<string, string>
+  quote: QuoteInfo | null
+  onClearReply: () => void
   onSave: (texto: string, existentes: string[], novos: File[], removidos: string[]) => Promise<void>
   onCancel: () => void
 }
 
-function EditBubble({ msg, signedUrls, onSave, onCancel }: EditBubbleProps) {
+function EditBubble({ msg, signedUrls, quote, onClearReply, onSave, onCancel }: EditBubbleProps) {
   const [texto, setTexto] = useState(msg.texto)
   const [existentes, setExistentes] = useState<string[]>(msg.arquivos)
   const [removidos, setRemovidos] = useState<string[]>([])
@@ -321,6 +328,9 @@ function EditBubble({ msg, signedUrls, onSave, onCancel }: EditBubbleProps) {
         className="w-[80%] max-w-[80%] rounded-2xl rounded-tr-none px-3.5 py-2.5 shadow-md space-y-2.5"
         style={{ background: WA_SENT }}
       >
+        {quote && (
+          <QuoteBox quote={quote} onRemove={onClearReply} className="bg-black/[0.08]" />
+        )}
         <textarea
           ref={taRef}
           value={texto}
@@ -399,72 +409,58 @@ function EditBubble({ msg, signedUrls, onSave, onCancel }: EditBubbleProps) {
 interface BubbleProps {
   msg: ThreadMsg
   signedUrls: Record<string, string>
+  adminLeuEm: string | null
+  reacoes: Reacao[]
+  quote: QuoteInfo | null
+  onReact: (emoji: string) => void
+  onReply: () => void
   onEdit: () => void
   onDelete: () => void
-  confirmingDelete: boolean
-  onConfirmDelete: () => void
-  onCancelDelete: () => void
+  selectMode: boolean
+  selected: boolean
+  onToggleSelect: () => void
 }
 
 function Bubble({
-  msg, signedUrls, onEdit, onDelete, confirmingDelete, onConfirmDelete, onCancelDelete,
+  msg, signedUrls, adminLeuEm, reacoes, quote, onReact, onReply, onEdit, onDelete, selectMode, selected, onToggleSelect,
 }: BubbleProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
   const isMe = msg.role === 'eu'
-  const menuRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!menuOpen) return
-    const close = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [menuOpen])
+  const myReaction = reacoes.find((r) => r.autor === 'cliente')?.emoji ?? null
+  // Só mensagens próprias podem ser selecionadas para exclusão
+  const selectable = selectMode && isMe
 
   return (
-    <div className={cn('flex group', isMe ? 'justify-end' : 'justify-start')}>
-      {/* Menu trigger à esquerda do bubble (apenas mensagens do usuário) */}
-      {isMe && (
-        <div ref={menuRef} className="relative flex items-end mb-1.5 mr-1">
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            className={cn(
-              'h-6 w-6 rounded-full flex items-center justify-center transition-all',
-              'opacity-0 group-hover:opacity-100',
-              menuOpen ? 'opacity-100 bg-black/15' : 'bg-black/10 hover:bg-black/15',
-            )}
-          >
-            <ChevronDown className="h-3.5 w-3.5 text-gray-600" />
-          </button>
-
-          {menuOpen && (
-            <div className="absolute bottom-8 right-0 bg-white rounded-2xl shadow-xl border border-gray-100 py-1.5 z-20 min-w-[140px]">
-              <button
-                onClick={() => { onEdit(); setMenuOpen(false) }}
-                className="flex items-center gap-2.5 px-4 py-2 text-sm w-full text-left text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                <Pencil className="h-3.5 w-3.5 text-gray-500" />
-                Editar
-              </button>
-              <button
-                onClick={() => { onDelete(); setMenuOpen(false) }}
-                className="flex items-center gap-2.5 px-4 py-2 text-sm w-full text-left text-red-600 hover:bg-red-50 transition-colors"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Excluir
-              </button>
-            </div>
+    <div
+      className={cn(
+        'flex group items-center rounded-lg transition-colors',
+        isMe ? 'justify-end' : 'justify-start',
+        selectable ? 'cursor-pointer -mx-2 px-2 py-0.5' : '',
+        selected ? 'bg-black/[0.06]' : '',
+        reacoes.length > 0 ? 'mb-3' : '',
+      )}
+      onClick={selectable ? onToggleSelect : undefined}
+    >
+      {/* Checkbox de seleção (mensagens próprias, no modo seleção) */}
+      {selectable && (
+        <span
+          className={cn(
+            'mr-auto shrink-0 h-5 w-5 rounded-full border flex items-center justify-center transition-colors',
+            selected ? 'bg-[#128C7E] border-[#128C7E] text-white' : 'border-gray-400 bg-white',
           )}
-        </div>
+        >
+          {selected && <Check className="h-3 w-3" />}
+        </span>
+      )}
+
+      {/* Menu à esquerda para mensagens próprias */}
+      {isMe && !selectMode && (
+        <MessageMenu side="left" onReact={onReact} onReply={onReply} onEdit={onEdit} onDelete={onDelete} myReaction={myReaction} />
       )}
 
       {/* Bubble */}
       <div
         className={cn(
-          'max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-sm',
+          'relative max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-sm',
           isMe ? 'rounded-tr-none' : 'rounded-tl-none bg-white',
         )}
         style={isMe ? { background: WA_SENT } : undefined}
@@ -475,42 +471,48 @@ function Bubble({
           </p>
         )}
 
-        {/* Confirm delete inline */}
-        {confirmingDelete ? (
-          <div className="space-y-1.5">
-            <p className="text-[12px] text-gray-600">Excluir esta mensagem?</p>
-            <div className="flex gap-3">
-              <button onClick={onCancelDelete} className="text-[12px] text-gray-500 hover:text-gray-700">
-                Não
+        {quote && <QuoteBox quote={quote} className="mb-1" />}
+
+        {msg.texto && (
+          <LinkifiedText
+            text={msg.texto}
+            className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed"
+          />
+        )}
+        {msg.arquivos.map((path) => (
+          <FileCard key={path} path={path} url={signedUrls[path] ?? ''} isMe={isMe} />
+        ))}
+        <p className="text-[10px] text-gray-400 text-right mt-0.5 select-none">
+          {msgTime(msg.time)}
+          {isMe && (
+            <DoubleCheck
+              read={!!(adminLeuEm && new Date(adminLeuEm) >= new Date(msg.time))}
+              size={15}
+              className="ml-1"
+            />
+          )}
+        </p>
+
+        {/* Reações */}
+        {reacoes.length > 0 && (
+          <div className={cn('absolute -bottom-3 flex gap-0.5', isMe ? 'right-1' : 'left-1')}>
+            {reacoes.map((r) => (
+              <button
+                key={r.autor}
+                onClick={(e) => { e.stopPropagation(); onReact(r.emoji) }}
+                className="text-[13px] leading-none bg-white rounded-full shadow-sm border border-gray-100 px-1 py-0.5 hover:scale-110 transition-transform"
+              >
+                {r.emoji}
               </button>
-              <button onClick={onConfirmDelete} className="text-[12px] font-semibold text-red-600 hover:text-red-700">
-                Excluir
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
-            {msg.texto && (
-              <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
-                {msg.texto}
-              </p>
-            )}
-            {msg.arquivos.map((path) => (
-              <FileCard key={path} path={path} url={signedUrls[path] ?? ''} isMe={isMe} />
             ))}
-            <p className="text-[10px] text-gray-400 text-right mt-0.5 select-none">
-              {msgTime(msg.time)}
-              {isMe && (
-                <DoubleCheck
-                  read={!!(sugestao?.admin_leu_em && new Date(sugestao.admin_leu_em) >= new Date(msg.time))}
-                  size={15}
-                  className="ml-1"
-                />
-              )}
-            </p>
-          </>
+          </div>
         )}
       </div>
+
+      {/* Menu à direita para mensagens do suporte */}
+      {!isMe && !selectMode && (
+        <MessageMenu side="right" onReact={onReact} onReply={onReply} myReaction={myReaction} />
+      )}
     </div>
   )
 }
@@ -583,6 +585,7 @@ function ChatInputBar({
         >
           <Paperclip className="h-4 w-4" />
         </button>
+        <EmojiInputButton onPick={(em) => onTextChange(text + em)} />
         <input
           ref={fileRef}
           type="file"
@@ -630,22 +633,6 @@ export default function Sugestoes() {
   const [sugestao, setSugestao] = useState<Sugestao | null>(null)
   const [loading, setLoading] = useState(true)
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({})
-  const [adminOnline, setAdminOnline] = useState(false)
-
-  // Presença: mostra "online" apenas quando algum admin está na aba suporte
-  useEffect(() => {
-    const ch = supabase.channel('fib-admin-presence')
-    ch
-      .on('presence', { event: 'sync' }, () => {
-        setAdminOnline(Object.keys(ch.presenceState()).length > 0)
-      })
-      .on('presence', { event: 'join' }, () => setAdminOnline(true))
-      .on('presence', { event: 'leave' }, () => {
-        setAdminOnline(Object.keys(ch.presenceState()).length > 0)
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [])
 
   // Send state
   const [replyText, setReplyText] = useState('')
@@ -654,19 +641,23 @@ export default function Sugestoes() {
 
   // Edit state
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  // Responder (quote): alvo pendente para nova mensagem OU novo alvo ao editar
+  const [replyTo, setReplyTo] = useState<ThreadMsg | null>(null)
+  const [replyCleared, setReplyCleared] = useState(false)
+  // Seleção múltipla para exclusão
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set()) // sumiço otimista ao excluir
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const newDividerRef = useRef<HTMLDivElement>(null)
   // dividerTime = timestamp de ANTES da última visita → posiciona o "N não lidas"
   const [dividerTime, setDividerTime] = useState<number>(0)
 
-  // ── Captura lastRead e marca como lido antes do primeiro paint ──────────────
+  // ── Snapshot de cliente_leu_em ao abrir → posiciona o divisor "N não lidas" ──
   useLayoutEffect(() => {
     if (!sugestao) return
-    const prev = getClientLastRead(sugestao.id)
-    setDividerTime(prev)
-    setClientLastRead(sugestao.id)
+    setDividerTime(sugestao.cliente_leu_em ? new Date(sugestao.cliente_leu_em).getTime() : 0)
   }, [sugestao?.id])
 
   // Marca leitura no Supabase para o admin ver os checks azuis
@@ -688,6 +679,25 @@ export default function Sugestoes() {
   }, [toast])
 
   useEffect(() => { carregar() }, [carregar])
+
+  // Realtime: re-carrega quando admin edita (reseta cliente_leu_em) para refletir checks
+  useEffect(() => {
+    if (!sugestao?.id) return
+    const ch = supabase
+      .channel(`client-leitura-${sugestao.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sugestoes_plataforma', filter: `id=eq.${sugestao.id}` },
+        (payload) => {
+          // Edição do admin rola cliente_leu_em para trás → move o divisor para revelar a msg editada
+          const newClienteLeuEm = (payload.new as any).cliente_leu_em as string | null
+          const newTs = newClienteLeuEm ? new Date(newClienteLeuEm).getTime() : 0
+          setDividerTime((prev) => (newTs > 0 && newTs < prev ? newTs : prev))
+          carregar()
+        })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reacoes_sugestoes', filter: `sugestao_id=eq.${sugestao.id}` },
+        () => { carregar() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [sugestao?.id, carregar])
 
   // ── Signed URLs ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -719,13 +729,14 @@ export default function Sugestoes() {
         : []
 
       if (sugestao) {
-        await responderSugestao(sugestao.id, texto, paths)
+        await responderSugestao(sugestao.id, texto, paths, replyTo?.id ?? null)
       } else {
         await criarSugestao(texto, paths, usuario?.restaurante_id ?? null)
       }
 
       setReplyText('')
       setReplyFiles([])
+      setReplyTo(null)
       await carregar()
     } catch {
       toast({ title: 'Erro ao enviar', variant: 'destructive' })
@@ -743,6 +754,7 @@ export default function Sugestoes() {
     removidos: string[],
   ) => {
     if (!user) return
+    const sugestaoId = sugestao?.id
     try {
       const novosPaths = novos.length > 0
         ? await uploadArquivosSugestao(user.id, novos)
@@ -753,13 +765,34 @@ export default function Sugestoes() {
         await excluirArquivosStorage(removidos)
       }
 
+      // Alvo do "responder": novo (replyTo), removido (replyCleared) ou o original
+      const novoRespondeA = replyCleared ? null : (replyTo ? replyTo.id : msg.respondeA)
+
       if (msg.tipo === 'sugestao') {
         await editarSugestao(msg.id, texto, finalArquivos)
       } else {
-        await editarResposta(msg.id, texto, finalArquivos)
+        await editarResposta(msg.id, texto, finalArquivos, novoRespondeA)
       }
 
+      // Atualização otimista: reflete texto, arquivos e checks instantaneamente
+      const rollbackLeuEm = new Date(new Date(msg.time).getTime() - 1).toISOString()
+      setSugestao((prev) => {
+        if (!prev) return prev
+        if (msg.tipo === 'sugestao') {
+          return { ...prev, texto, arquivos: finalArquivos, admin_leu_em: rollbackLeuEm }
+        }
+        return {
+          ...prev,
+          admin_leu_em: rollbackLeuEm,
+          respostas: prev.respostas.map((r) =>
+            r.id === msg.id ? { ...r, texto, arquivos: finalArquivos, responde_a: novoRespondeA } : r
+          ),
+        }
+      })
       setEditingId(null)
+      setReplyTo(null)
+      setReplyCleared(false)
+      if (sugestaoId) await resetAdminLeu(sugestaoId, msg.time)
       await carregar()
     } catch {
       toast({ title: 'Erro ao salvar', variant: 'destructive' })
@@ -767,25 +800,101 @@ export default function Sugestoes() {
   }
 
   // ── Excluir mensagem ────────────────────────────────────────────────────────
-  const handleConfirmDelete = async (msg: ThreadMsg) => {
+  // ── Seleção múltipla para exclusão ──────────────────────────────────────────
+  const enterSelectDelete = (msg: ThreadMsg) => {
+    setEditingId(null)
+    setSelectMode(true)
+    setSelectedIds(new Set([msg.id]))
+  }
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const exitSelect = () => {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+  }
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0) return
+    const alvos = Array.from(selectedIds)
+      .map((id) => thread.find((m) => m.id === id))
+      .filter((m): m is ThreadMsg => !!m)
+    const ids = alvos.map((m) => m.id)
+    // Sumiço otimista (sem delay) + sai do modo seleção
+    setHiddenIds((prev) => new Set([...prev, ...ids]))
+    exitSelect()
     try {
-      if (msg.arquivos.length > 0) {
-        await excluirArquivosStorage(msg.arquivos)
+      for (const msg of alvos) {
+        if (msg.arquivos.length > 0) await excluirArquivosStorage(msg.arquivos)
+        if (msg.tipo === 'sugestao') {
+          // Não exclui a linha (mantém o contato e as mensagens do outro) — só "apaga" o conteúdo
+          await editarSugestao(msg.id, '', [])
+        } else {
+          await excluirResposta(msg.id)
+        }
       }
-      if (msg.tipo === 'sugestao') {
-        await excluirSugestao(msg.id)
-      } else {
-        await excluirResposta(msg.id)
-      }
-      setConfirmDeleteId(null)
       await carregar()
+      setHiddenIds(new Set())
     } catch {
+      setHiddenIds(new Set())
       toast({ title: 'Erro ao excluir', variant: 'destructive' })
+      await carregar()
     }
   }
 
+  // ── Reações ─────────────────────────────────────────────────────────────────
+  const reacoesMap: Record<string, Reacao[]> = {}
+  for (const r of sugestao?.reacoes ?? []) {
+    ;(reacoesMap[r.mensagem_id] ??= []).push(r)
+  }
+  const handleReact = async (mensagemId: string, emoji: string) => {
+    if (!sugestao) return
+    const mine = sugestao.reacoes.find((r) => r.mensagem_id === mensagemId && r.autor === 'cliente')
+    // Atualização otimista (sem delay)
+    setSugestao((prev) => {
+      if (!prev) return prev
+      let reacoes = prev.reacoes.filter((r) => !(r.mensagem_id === mensagemId && r.autor === 'cliente'))
+      if (!mine || mine.emoji !== emoji) {
+        reacoes = [...reacoes, { mensagem_id: mensagemId, autor: 'cliente', emoji }]
+      }
+      return { ...prev, reacoes }
+    })
+    try {
+      await reagirCliente(sugestao.id, mensagemId, emoji)
+    } catch {
+      carregar()
+    }
+  }
+
+  // ── Responder (quote) ───────────────────────────────────────────────────────
+  const resolveQuote = (respondeA: string | null): QuoteInfo | null => {
+    if (!respondeA || !sugestao) return null
+    if (respondeA === sugestao.id) {
+      return { autorLabel: 'Você', texto: sugestao.texto || (sugestao.arquivos.length > 0 ? '📎 Arquivo' : '') }
+    }
+    const r = sugestao.respostas.find((x) => x.id === respondeA)
+    if (!r) return { autorLabel: '', texto: 'mensagem removida' }
+    return {
+      autorLabel: r.autor === 'usuario' ? 'Você' : 'Suporte FIB',
+      texto: r.texto || (r.arquivos.length > 0 ? '📎 Arquivo' : ''),
+    }
+  }
+  const startReply = (msg: ThreadMsg) => {
+    setReplyCleared(false)
+    setReplyTo(msg)
+  }
+  // Alvo efetivo do "responder" ao editar (novo, removido ou original)
+  const editingMsg = editingId && sugestao
+    ? buildThread(sugestao).find((m) => m.id === editingId) ?? null
+    : null
+  const editEffectiveReplyId = replyCleared ? null : (replyTo ? replyTo.id : (editingMsg?.respondeA ?? null))
+
   // ── Thread ──────────────────────────────────────────────────────────────────
-  const thread = sugestao ? buildThread(sugestao) : []
+  const thread = (sugestao ? buildThread(sugestao) : []).filter((m) => !hiddenIds.has(m.id))
   const newDividerIdx = (() => {
     if (dividerTime > 0) {
       // Mostra divider antes da primeira mensagem do suporte após a última visita
@@ -822,12 +931,7 @@ export default function Sugestoes() {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-[15px] font-semibold text-white leading-tight">Suporte FIB</p>
-          <p className="text-[12px] text-white/70 flex items-center gap-1.5">
-            {!loading && adminOnline && (
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400 shrink-0" />
-            )}
-            {loading ? '…' : adminOnline ? 'online' : 'offline'}
-          </p>
+          <p className="text-[12px] text-white/70">Dúvidas e sugestões</p>
         </div>
       </div>
 
@@ -870,20 +974,27 @@ export default function Sugestoes() {
               <EditBubble
                 msg={msg}
                 signedUrls={signedUrls}
+                quote={resolveQuote(editEffectiveReplyId)}
+                onClearReply={() => { setReplyTo(null); setReplyCleared(true) }}
                 onSave={(texto, existentes, novos, removidos) =>
                   handleSaveEdit(msg, texto, existentes, novos, removidos)
                 }
-                onCancel={() => setEditingId(null)}
+                onCancel={() => { setEditingId(null); setReplyTo(null); setReplyCleared(false) }}
               />
             ) : (
               <Bubble
                 msg={msg}
                 signedUrls={signedUrls}
-                onEdit={() => { setConfirmDeleteId(null); setEditingId(msg.id) }}
-                onDelete={() => { setEditingId(null); setConfirmDeleteId(msg.id) }}
-                confirmingDelete={confirmDeleteId === msg.id}
-                onConfirmDelete={() => handleConfirmDelete(msg)}
-                onCancelDelete={() => setConfirmDeleteId(null)}
+                adminLeuEm={sugestao?.admin_leu_em ?? null}
+                reacoes={reacoesMap[msg.id] ?? []}
+                quote={resolveQuote(msg.respondeA)}
+                onReact={(emoji) => handleReact(msg.id, emoji)}
+                onReply={() => startReply(msg)}
+                onEdit={() => { setReplyTo(null); setReplyCleared(false); setEditingId(msg.id) }}
+                onDelete={() => enterSelectDelete(msg)}
+                selectMode={selectMode}
+                selected={selectedIds.has(msg.id)}
+                onToggleSelect={() => toggleSelect(msg.id)}
               />
             )}
           </Fragment>
@@ -892,15 +1003,48 @@ export default function Sugestoes() {
         <div ref={bottomRef} />
       </div>
 
-      <ChatInputBar
-        text={replyText}
-        files={replyFiles}
-        sending={sending}
-        onTextChange={setReplyText}
-        onFilesAdd={(f) => setReplyFiles((p) => [...p, ...f])}
-        onFileRemove={(idx) => setReplyFiles((p) => p.filter((_, i) => i !== idx))}
-        onSend={handleSend}
-      />
+      {selectMode ? (
+        <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-3 bg-white border-t border-gray-200">
+          <button
+            onClick={exitSelect}
+            className="text-sm font-medium text-gray-600 hover:text-gray-800 px-3 py-2"
+          >
+            Cancelar
+          </button>
+          <span className="text-sm text-gray-500">
+            {selectedIds.size} selecionada{selectedIds.size !== 1 ? 's' : ''}
+          </span>
+          <button
+            onClick={handleDeleteSelected}
+            disabled={selectedIds.size === 0}
+            className="flex items-center gap-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg px-4 py-2 transition-colors"
+          >
+            <Trash2 className="h-4 w-4" />
+            Excluir
+          </button>
+        </div>
+      ) : (
+        <div className="shrink-0">
+          {replyTo && !editingId && (
+            <div className="px-3 pt-2" style={{ background: '#F0F2F5' }}>
+              <QuoteBox
+                quote={resolveQuote(replyTo.id) ?? { autorLabel: '', texto: '' }}
+                onRemove={() => setReplyTo(null)}
+                className="bg-white"
+              />
+            </div>
+          )}
+          <ChatInputBar
+            text={replyText}
+            files={replyFiles}
+            sending={sending}
+            onTextChange={setReplyText}
+            onFilesAdd={(f) => setReplyFiles((p) => [...p, ...f])}
+            onFileRemove={(idx) => setReplyFiles((p) => p.filter((_, i) => i !== idx))}
+            onSend={handleSend}
+          />
+        </div>
+      )}
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { useLocation, Link, useNavigate } from 'react-router-dom'
 import { LogOut, Settings as SettingsIcon, User as UserIcon, ShieldCheck } from 'lucide-react'
 import { usePlatformAdmin } from '@/hooks/use-platform-admin'
 import { buscarTotalNaoLidas } from '@/lib/queries/admin'
+import { supabase } from '@/lib/supabase/client'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
@@ -52,7 +53,7 @@ export function TopHeader() {
     buscarTotalNaoLidas().then(setAdminUnread).catch(() => {})
   }, [isAdmin])
 
-  // Atualização em tempo real via evento (quando o admin marca como lido dentro de /admin)
+  // Atualização via evento (quando Admin.tsx está montado e despacha a contagem)
   useEffect(() => {
     const handler = (e: Event) => {
       setAdminUnread((e as CustomEvent<{ count: number }>).detail.count)
@@ -60,6 +61,19 @@ export function TopHeader() {
     window.addEventListener('fib-unread-update', handler)
     return () => window.removeEventListener('fib-unread-update', handler)
   }, [])
+
+  // Realtime: atualiza badge quando chegam mensagens novas ou leituras mudam (funciona em qualquer rota)
+  useEffect(() => {
+    if (!isAdmin) return
+    const ch = supabase
+      .channel('topheader-unread')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'respostas_sugestoes' },
+        () => { buscarTotalNaoLidas().then(setAdminUnread).catch(() => {}) })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sugestoes_plataforma' },
+        () => { buscarTotalNaoLidas().then(setAdminUnread).catch(() => {}) })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [isAdmin])
 
   const handleLogout = async () => {
     await logout()
