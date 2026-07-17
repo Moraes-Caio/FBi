@@ -34,6 +34,8 @@ const routeTitles: Record<string, string> = {
   '/insights': 'Insights',
   '/acoes': 'Ações',
   '/relatorios': 'Relatórios',
+  '/qrcode': 'QR Codes',
+  '/garcons': 'Garçons',
 }
 
 export function TopHeader() {

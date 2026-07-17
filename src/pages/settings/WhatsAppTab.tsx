@@ -5,6 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { MessageCircle, CheckCircle2, RefreshCw, Loader2, Smartphone } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { supabase } from '@/lib/supabase/client'
+import { cn } from '@/lib/utils'
 
 interface EstadoWhats {
   hasInstance: boolean
@@ -25,7 +26,9 @@ export function WhatsAppTab({ restauranteId }: { restauranteId: number | null })
   const [estado, setEstado] = useState<EstadoWhats | null>(null)
   const [conectando, setConectando] = useState(false)
   const [desconectando, setDesconectando] = useState(false)
+  const [reiniciando, setReiniciando] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastConnectRef = useRef(0)
 
   const chamar = useCallback(async (action: string): Promise<EstadoWhats | null> => {
     const { data, error } = await supabase.functions.invoke('whatsapp-instancia', { body: { action } })
@@ -58,26 +61,61 @@ export function WhatsAppTab({ restauranteId }: { restauranteId: number | null })
 
   const iniciarConexao = async () => {
     setConectando(true)
-    try {
+    const disparar = async () => {
       const d = await chamar('iniciar')
+      lastConnectRef.current = Date.now()
+      return d
+    }
+    const concluir = (s: EstadoWhats | null) => {
+      pararPolling()
+      setConectando(false)
+      toast({ title: 'WhatsApp conectado!', description: s?.numero ? `Número ${s.numero}` : undefined })
+    }
+    try {
+      const d = await disparar()
       setEstado(d)
-      if (d?.connected) { setConectando(false); return }
-      // Polling do status (renova QR automaticamente e detecta conexão)
+      if (d?.connected) { concluir(d); return }
+      // Polling: detecta conexão e renova o QR (a uazapi expira o QR em ~2 min)
       pararPolling()
       pollRef.current = setInterval(async () => {
         try {
-          const s = await chamar('status')
-          setEstado(s)
-          if (s?.connected) {
-            pararPolling()
-            setConectando(false)
-            toast({ title: 'WhatsApp conectado!', description: s.numero ? `Número ${s.numero}` : undefined })
+          // QR perto de expirar → re-dispara o connect para gerar um novo
+          if (Date.now() - lastConnectRef.current > 110000) {
+            const d2 = await disparar()
+            setEstado(d2)
+            if (d2?.connected) concluir(d2)
+            return
           }
-        } catch { /* mantém tentando */ }
+          const s = await chamar('status')
+          // Se a instância sumiu no meio do processo, recria e continua
+          if (s && !s.hasInstance) {
+            const d3 = await disparar()
+            setEstado(d3)
+            if (d3?.connected) concluir(d3)
+            return
+          }
+          setEstado(s)
+          if (s?.connected) concluir(s)
+        } catch { /* transitório: mantém tentando */ }
       }, 3000)
     } catch (err) {
+      pararPolling()
       setConectando(false)
       toast({ title: 'Erro ao conectar', description: (err as Error).message, variant: 'destructive' })
+    }
+  }
+
+  const reiniciar = async () => {
+    setReiniciando(true)
+    try {
+      await chamar('reset')
+      const s = await chamar('status')
+      setEstado(s)
+      toast({ title: 'Conexão reiniciada' })
+    } catch (err) {
+      toast({ title: 'Erro ao reiniciar', description: (err as Error).message, variant: 'destructive' })
+    } finally {
+      setReiniciando(false)
     }
   }
 
@@ -125,10 +163,17 @@ export function WhatsAppTab({ restauranteId }: { restauranteId: number | null })
                 </p>
               </div>
             </div>
-            <Button variant="outline" onClick={desconectar} disabled={desconectando}
-              className="text-red-600 border-red-200 hover:bg-red-50">
-              {desconectando ? 'Desconectando…' : 'Desconectar'}
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button variant="ghost" size="sm" onClick={reiniciar} disabled={reiniciando || desconectando}
+                title="Reinicia a sessão se o envio/recebimento travar">
+                <RefreshCw className={cn('h-4 w-4 mr-1', reiniciando && 'animate-spin')} />
+                {reiniciando ? 'Reiniciando…' : 'Reiniciar'}
+              </Button>
+              <Button variant="outline" onClick={desconectar} disabled={desconectando}
+                className="text-red-600 border-red-200 hover:bg-red-50">
+                {desconectando ? 'Desconectando…' : 'Desconectar'}
+              </Button>
+            </div>
           </div>
         ) : conectando ? (
           <div className="flex flex-col items-center gap-4 py-4">

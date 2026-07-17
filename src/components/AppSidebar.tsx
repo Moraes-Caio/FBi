@@ -7,6 +7,7 @@ import {
   Zap,
   FileBarChart,
   QrCode,
+  Users,
   HelpCircle,
 } from 'lucide-react'
 import {
@@ -31,6 +32,7 @@ const navigation = [
   { name: 'Ações', href: '/acoes', icon: Zap, modulo: 'acoes' },
   { name: 'Relatórios', href: '/relatorios', icon: FileBarChart, modulo: 'relatorios' },
   { name: 'QR Code', href: '/qrcode', icon: QrCode, modulo: 'qrcodes' },
+  { name: 'Garçons', href: '/garcons', icon: Users, modulo: 'qrcodes' },
 ]
 
 export function AppSidebar() {

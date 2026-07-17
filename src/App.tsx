@@ -14,6 +14,7 @@ import Insights from './pages/Insights'
 import Actions from './pages/Actions'
 import Reports from './pages/Reports'
 import QRCodes from './pages/QRCodes'
+import Garcons from './pages/Garcons'
 import Settings from './pages/Settings'
 import Login from './pages/auth/Login'
 import Cadastro from './pages/auth/Cadastro'
@@ -23,6 +24,7 @@ import OnboardingMembro from './pages/auth/OnboardingMembro'
 import MyAccount from './pages/MyAccount'
 import Sugestoes from './pages/Sugestoes'
 import Admin from './pages/Admin'
+import FeedbackLanding from './pages/FeedbackLanding'
 import { RotaProtegida } from './components/RotaProtegida'
 import { RotaPermitida } from './components/RotaPermitida'
 
@@ -37,6 +39,8 @@ const App = () => (
           <Route path="/login" element={<Login />} />
           <Route path="/cadastro" element={<Cadastro />} />
           <Route path="/recuperar-senha" element={<RecuperarSenha />} />
+          {/* Página pública que o cliente abre ao escanear o QR */}
+          <Route path="/f/:slug" element={<FeedbackLanding />} />
 
           <Route element={<RotaProtegida />}>
             <Route path="/onboarding" element={<Onboarding />} />
@@ -97,6 +101,14 @@ const App = () => (
                 element={
                   <RotaPermitida modulo="qrcodes">
                     <QRCodes />
+                  </RotaPermitida>
+                }
+              />
+              <Route
+                path="/garcons"
+                element={
+                  <RotaPermitida modulo="qrcodes">
+                    <Garcons />
                   </RotaPermitida>
                 }
               />
