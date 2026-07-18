@@ -28,5 +28,19 @@ export function construirSystemPromptBanner(feedbacksUltimas24h: any[]) {
 }
 
 export function construirSystemPromptResumoExecutivo(dadosRelatorio: any) {
-  return `Gere um resumo executivo em Markdown para o relatório:\n${JSON.stringify(dadosRelatorio)}`
+  return `Você escreve o resumo executivo do relatório de um restaurante, lido pelo DONO
+(não é analista de dados). Escreva em português do Brasil, direto e prático.
+
+REGRAS:
+- Texto corrido, 3 a 5 frases curtas. SEM markdown, SEM títulos, SEM bullets, SEM emojis.
+- Nunca invente número: use apenas os dados abaixo. Se um dado não existir, não cite.
+- Nada de jargão (não use "NPS", "CSAT", "sentimento", "score", "churn").
+- Diga o índice de satisfação como "X de 100".
+- Estrutura: (1) como foi o período em volume e satisfação; (2) o que mais pesou
+  positivo e negativo; (3) UMA recomendação concreta e acionável para as próximas semanas.
+- Se o total de avaliações for pequeno (menos de 10), diga explicitamente que a amostra
+  ainda é pequena e que a leitura é preliminar.
+
+DADOS DO PERÍODO:
+${JSON.stringify(dadosRelatorio)}`
 }
