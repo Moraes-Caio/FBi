@@ -1,6 +1,6 @@
-import { Sparkles } from 'lucide-react'
 import { getTema, getFiltro } from '@/lib/qr-temas'
 import { WhatsappIcon } from '@/components/WhatsappIcon'
+import { iamaiLogo } from '@/assets/brand'
 
 export interface LandingViewProps {
   restauranteNome: string
@@ -37,26 +37,24 @@ export function LandingView({
   const waLink = whatsapp ? `https://wa.me/${whatsapp}` : null
 
   const Marca = (
-    <div className="flex items-center gap-1.5 text-[11px] font-medium opacity-70">
-      <Sparkles className="h-3 w-3" />
-      <span>Feedback Inteligente · IAMAI</span>
+    <div className="flex flex-col items-center gap-1.5">
+      <div className="bg-white rounded-md px-2.5 py-1 shadow-sm">
+        <img src={iamaiLogo} alt="IAMAI" className="h-4 w-auto object-contain" />
+      </div>
+      <span className="text-[10px] font-medium opacity-70">Feedback Inteligente</span>
     </div>
   )
 
   const botaoClasses =
-    'inline-flex w-full items-center justify-center gap-2.5 rounded-2xl px-6 py-4 text-lg font-bold shadow-xl transition-transform active:scale-[0.97]'
-  const botaoStyle = { background: tema.botao, color: tema.botaoTexto }
+    'inline-flex items-center justify-center gap-2.5 rounded-full bg-white px-6 py-3 text-[15px] font-bold text-emerald-950 shadow-[0_10px_26px_-8px_rgba(0,0,0,0.5)] ring-1 ring-black/5 transition active:scale-[0.96] hover:shadow-[0_14px_32px_-8px_rgba(0,0,0,0.55)]'
+  const IconeVerde = <WhatsappIcon className="h-6 w-6 text-[#25D366]" />
   const Botao =
     !whatsapp ? (
       <p className="text-sm opacity-70">WhatsApp ainda não configurado.</p>
     ) : preview || !waLink ? (
-      <div className={botaoClasses} style={botaoStyle}>
-        <WhatsappIcon className="h-6 w-6" /> Dar meu feedback
-      </div>
+      <div className={botaoClasses}>{IconeVerde} Dar meu feedback</div>
     ) : (
-      <a href={waLink} className={botaoClasses} style={botaoStyle}>
-        <WhatsappIcon className="h-6 w-6" /> Dar meu feedback
-      </a>
+      <a href={waLink} className={botaoClasses}>{IconeVerde} Dar meu feedback</a>
     )
 
   if (usaImagem) {
@@ -71,7 +69,7 @@ export function LandingView({
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
         <div className="relative z-10 h-full flex flex-col items-center justify-end gap-4 px-5 pb-10 text-white">
           {garcomNome && <p className="text-sm font-medium drop-shadow">Atendimento de {garcomNome}</p>}
-          <div className="w-full max-w-xs">{Botao}</div>
+          <div className="flex justify-center">{Botao}</div>
           <div className="text-white">{Marca}</div>
         </div>
       </div>
@@ -100,7 +98,7 @@ export function LandingView({
         <p className="text-base opacity-95">
           {mensagem?.trim() || 'É rapidinho! Conte como foi sua experiência com a gente. 💬'}
         </p>
-        <div className="mt-1 w-full">{Botao}</div>
+        <div className="mt-1 flex justify-center">{Botao}</div>
         <div className="mt-6">{Marca}</div>
       </div>
     </div>

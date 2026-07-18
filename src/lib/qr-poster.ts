@@ -48,6 +48,24 @@ export function landingUrl(slug: string): string {
   return `${base}/f/${slug}`
 }
 
+/** Baixa um Blob de forma robusta (funciona mesmo após await, fora do gesto do clique). */
+export function baixarBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+
+export function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Falha ao gerar a imagem.'))), 'image/png')
+  })
+}
+
 export interface PosterOpts {
   url: string
   nome: string

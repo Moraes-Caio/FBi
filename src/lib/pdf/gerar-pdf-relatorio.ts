@@ -47,27 +47,34 @@ export async function gerarPdfRelatorio(
   doc.setFontSize(11)
   doc.setTextColor(0, 0, 0)
   const kpis = dadosRelatorio.kpis || {}
-  doc.text(`Total Feedbacks: ${kpis.totalFeedbacks || 0}`, 14, yPos)
-  doc.text(`Sentimento Geral: ${kpis.sentiment || 0}/100`, 70, yPos)
-  doc.text(`NPS: ${kpis.nps || 0}`, 140, yPos)
-  yPos += 8
-  doc.text(`Tema Crítico: ${kpis.criticalTheme || 'Nenhum'}`, 14, yPos)
+  const temaCritico =
+    kpis.criticalTheme && kpis.criticalTheme !== 'Nenhum'
+      ? `${kpis.criticalTheme} (${kpis.criticalPercent || 0}% negativas)`
+      : 'Nenhum'
+  doc.text(`Total de avaliações: ${kpis.totalFeedbacks || 0}`, 14, yPos)
+  doc.text(`Índice de satisfação: ${kpis.sentiment || 0}/100`, 90, yPos)
+  yPos += 7
+  doc.text(`Positivas: ${kpis.positivos || 0} (${kpis.positivePercent || 0}%)`, 14, yPos)
+  doc.text(`Negativas: ${kpis.negativos || 0} (${kpis.negativePercent || 0}%)`, 90, yPos)
+  yPos += 7
+  doc.text(`Tema que mais preocupa: ${temaCritico}`, 14, yPos)
   yPos += 15
 
-  // Top Categorias
+  // Categorias
   doc.setFontSize(14)
   doc.setTextColor(29, 78, 216)
-  doc.text('Top Categorias', 14, yPos)
+  doc.text('Avaliações por categoria', 14, yPos)
   yPos += 5
 
   const categorias = dadosRelatorio.categorias || []
   if (categorias.length > 0) {
     autoTable(doc, {
       startY: yPos,
-      head: [['Categoria', 'Score']],
+      head: [['Categoria', 'Avaliações', '% positivas']],
       body: categorias.map((c: any) => [
         c.name || c.categoria || '-',
-        c.score || c.pontuacao || '-',
+        String(c.count ?? '-'),
+        c.score != null ? `${c.score}%` : '-',
       ]),
       theme: 'striped',
       headStyles: { fillColor: [29, 78, 216] },

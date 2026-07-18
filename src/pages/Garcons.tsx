@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Plus, Trash2, Download, FileDown, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { jsPDF } from 'jspdf'
-import { desenharPoster, landingUrl, POSTER_W, POSTER_H } from '@/lib/qr-poster'
+import { desenharPoster, landingUrl, baixarBlob, canvasToBlob, POSTER_W, POSTER_H } from '@/lib/qr-poster'
 import { cn } from '@/lib/utils'
 
 interface Garcom { id: number; nome_garcon: string; ativo: boolean }
@@ -21,10 +21,10 @@ function gerarSlug(n = 8) {
 }
 
 // Sem nome do garçom na imagem — o QR já é único por garçom
-async function posterDataUrl(url: string, nome: string, temaId: string, tagline: string, filtroId: string): Promise<string> {
+async function posterCanvas(url: string, nome: string, temaId: string, tagline: string, filtroId: string): Promise<HTMLCanvasElement> {
   const c = document.createElement('canvas')
   await desenharPoster(c, { url, nome, temaId, tagline, filtroId })
-  return c.toDataURL('image/png')
+  return c
 }
 
 export default function Garcons() {
@@ -119,11 +119,9 @@ export default function Garcons() {
   const baixarPng = async (g: Garcom) => {
     try {
       const slug = await ensureQr(g.id)
-      const dataUrl = await posterDataUrl(landingUrl(slug), restaurantName, posterTema, posterMsg, posterFiltro)
-      const a = document.createElement('a')
-      a.href = dataUrl
-      a.download = `qrcode-${g.nome_garcon.replace(/\s+/g, '-').toLowerCase()}.png`
-      a.click()
+      const canvas = await posterCanvas(landingUrl(slug), restaurantName, posterTema, posterMsg, posterFiltro)
+      const blob = await canvasToBlob(canvas)
+      baixarBlob(blob, `qrcode-${g.nome_garcon.replace(/\s+/g, '-').toLowerCase()}.png`)
     } catch (e: any) {
       toast.error('Erro ao gerar PNG', { description: e.message })
     }
@@ -144,11 +142,11 @@ export default function Garcons() {
       for (let i = 0; i < ativos.length; i++) {
         const g = ativos[i]
         const slug = await ensureQr(g.id)
-        const dataUrl = await posterDataUrl(landingUrl(slug), restaurantName, posterTema, posterMsg, posterFiltro)
+        const canvas = await posterCanvas(landingUrl(slug), restaurantName, posterTema, posterMsg, posterFiltro)
         if (i > 0) pdf.addPage()
-        pdf.addImage(dataUrl, 'PNG', x, y, w, h)
+        pdf.addImage(canvas, 'PNG', x, y, w, h)
       }
-      pdf.save(`qrcodes-garcons-${restaurantName.replace(/\s+/g, '-').toLowerCase()}.pdf`)
+      baixarBlob(pdf.output('blob'), `qrcodes-garcons-${restaurantName.replace(/\s+/g, '-').toLowerCase()}.pdf`)
       toast.success('PDF baixado!')
     } catch (e: any) {
       toast.error('Erro ao gerar PDF', { description: e.message })

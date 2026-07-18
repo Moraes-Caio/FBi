@@ -30,6 +30,11 @@ export interface DashboardData {
     criticalTheme: string
     criticalPercent: number
     hasPrevData: boolean
+    positivos: number
+    negativos: number
+    neutros: number
+    positivePercent: number
+    negativePercent: number
   }
   chartData: Array<{ date: string; sentiment: number | null; avaliacoes: number }>
   categories: CategoryScore[]
@@ -88,6 +93,13 @@ export const buscarKpis = async (restauranteId: number | null, periodo: PeriodIn
     f.sentimento?.toLowerCase() === 'positivo' || f.sentimento?.toLowerCase() === 'positive'
   const isNegativo = (f: any) =>
     f.sentimento?.toLowerCase() === 'negativo' || f.sentimento?.toLowerCase() === 'negative'
+
+  // Contagens absolutas do período atual (métricas diretas que o dono entende)
+  const positivos = currentFeedbacks.filter(isPositivo).length
+  const negativos = currentFeedbacks.filter(isNegativo).length
+  const neutros = totalFeedbacks - positivos - negativos
+  const positivePercent = totalFeedbacks ? Math.round((positivos / totalFeedbacks) * 100) : 0
+  const negativePercent = totalFeedbacks ? Math.round((negativos / totalFeedbacks) * 100) : 0
 
   const getSentimentScore = (arr: any[]) => {
     if (!arr.length) return 0
@@ -160,6 +172,11 @@ export const buscarKpis = async (restauranteId: number | null, periodo: PeriodIn
     criticalTheme,
     criticalPercent,
     hasPrevData,
+    positivos,
+    negativos,
+    neutros,
+    positivePercent,
+    negativePercent,
   }
 }
 

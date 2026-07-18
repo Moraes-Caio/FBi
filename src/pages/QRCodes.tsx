@@ -10,11 +10,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { jsPDF } from 'jspdf'
-import { QrCode, Download, Loader2, ChevronDown, FileImage, FileText, ExternalLink, ImagePlus } from 'lucide-react'
+import { QrCode, Download, Loader2, ChevronDown, FileImage, FileText, ExternalLink, ImagePlus, Check, ArrowRight, ArrowLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { QR_TEMAS, QR_FILTROS } from '@/lib/qr-temas'
-import { landingUrl, desenharPoster, POSTER_W, POSTER_H } from '@/lib/qr-poster'
+import { QR_TEMAS, QR_FILTROS, getTema, getFiltro } from '@/lib/qr-temas'
+import { landingUrl, desenharPoster, baixarBlob, canvasToBlob, POSTER_W, POSTER_H } from '@/lib/qr-poster'
 import { LandingView } from '@/components/LandingView'
+import { ImageCropper } from '@/components/ImageCropper'
 import { toast } from 'sonner'
 
 interface QrData {
@@ -32,6 +33,7 @@ function gerarSlug(n = 8) {
   return s
 }
 
+// Redimensiona a imagem enviada para o formato de celular (retrato 9:16), preenchendo a tela.
 export default function QRCodes() {
   const [qrData, setQrData] = useState<QrData | null>(null)
   const [restaurantName, setRestaurantName] = useState('Restaurante')
@@ -48,12 +50,16 @@ export default function QRCodes() {
   const [cfgMensagem, setCfgMensagem] = useState('')
   const [savingCfg, setSavingCfg] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [cropFile, setCropFile] = useState<File | null>(null)
 
   // Métricas
   const [metricas, setMetricas] = useState<{ dia7: number; dia30: number; barras: { label: string; n: number }[] }>({ dia7: 0, dia30: 0, barras: [] })
   const [aba, setAba] = useState('config')
   const [previewAba, setPreviewAba] = useState<'pagina' | 'qr'>('pagina')
   const [numero, setNumero] = useState<string | null>(null)
+  const [editando, setEditando] = useState(false)
+  const [passo, setPasso] = useState<1 | 2>(1)
+  const cfgSalvoRef = useRef({ modo: 'estilo', estilo: 'classico', filtro: 'nenhum', imagem: null as string | null, mensagem: '' })
 
   useEffect(() => {
     loadData()
@@ -83,11 +89,20 @@ export default function QRCodes() {
         setRestauranteId(config?.id ?? null)
         if (config?.nome_restaurante) setRestaurantName(config.nome_restaurante)
         setNumero(config?.numero_whatsapp ?? null)
-        setCfgModo(config?.qr_bg_modo === 'upload' ? 'upload' : 'estilo')
+        const modo = config?.qr_bg_modo === 'upload' ? 'upload' : 'estilo'
+        setCfgModo(modo)
         setCfgEstilo(config?.qr_estilo ?? 'classico')
         setCfgFiltro(config?.qr_filtro ?? 'nenhum')
         setCfgImagem(config?.qr_bg_imagem ?? null)
         setCfgMensagem(config?.qr_mensagem ?? '')
+        cfgSalvoRef.current = {
+          modo, estilo: config?.qr_estilo ?? 'classico', filtro: config?.qr_filtro ?? 'nenhum',
+          imagem: config?.qr_bg_imagem ?? null, mensagem: config?.qr_mensagem ?? '',
+        }
+        // Nunca configurou → já abre no modo edição (passo 1)
+        const jaConfigurou = !!(config?.qr_bg_modo || config?.qr_estilo || config?.qr_mensagem || config?.qr_bg_imagem)
+        setEditando(!jaConfigurou)
+        if (!jaConfigurou) { setPasso(1); setPreviewAba('qr') }
       }
 
       // Sem restaurante vinculado: não há QR Code a gerar — encerra sem erro
@@ -199,7 +214,9 @@ export default function QRCodes() {
         })
         .eq('id', restauranteId)
       if (error) throw error
-      toast.success('Página do cliente atualizada!')
+      cfgSalvoRef.current = { modo: cfgModo, estilo: cfgEstilo, filtro: cfgFiltro, imagem: cfgImagem, mensagem: cfgMensagem }
+      setEditando(false)
+      toast.success('QR Code e página salvos!')
     } catch (err: any) {
       toast.error('Erro ao salvar', { description: err.message })
     } finally {
@@ -207,27 +224,23 @@ export default function QRCodes() {
     }
   }
 
-  const onUploadFundo = async (file: File) => {
+  const cancelarEdicao = () => {
+    const s = cfgSalvoRef.current
+    setCfgModo(s.modo as 'estilo' | 'upload')
+    setCfgEstilo(s.estilo)
+    setCfgFiltro(s.filtro)
+    setCfgImagem(s.imagem)
+    setCfgMensagem(s.mensagem)
+    setEditando(false)
+  }
+
+  // Recebe o blob já recortado no formato do celular (1080×1920) pelo ImageCropper
+  const enviarImagem = async (blob: Blob) => {
     if (!restauranteId) return
-    // Avisa se a imagem não for vertical (fica ruim no celular)
-    try {
-      const dim = await new Promise<{ w: number; h: number }>((resolve) => {
-        const img = new Image()
-        img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight })
-        img.onerror = () => resolve({ w: 0, h: 0 })
-        img.src = URL.createObjectURL(file)
-      })
-      if (dim.w && dim.h && dim.w >= dim.h) {
-        toast.warning('Imagem na horizontal', {
-          description: 'Prefira uma imagem vertical (retrato, ex: 1080×1920) para preencher bem a tela do celular.',
-        })
-      }
-    } catch { /* ignora */ }
     setUploading(true)
     try {
-      const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      const path = `${restauranteId}/${Date.now()}-${safe}`
-      const { error } = await supabase.storage.from('qr-fundos').upload(path, file, { upsert: true })
+      const path = `${restauranteId}/${Date.now()}.jpg`
+      const { error } = await supabase.storage.from('qr-fundos').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
       if (error) throw error
       const { data } = supabase.storage.from('qr-fundos').getPublicUrl(path)
       setCfgImagem(data.publicUrl)
@@ -236,6 +249,7 @@ export default function QRCodes() {
         .from('restaurantes')
         .update({ qr_bg_imagem: data.publicUrl, qr_bg_modo: 'upload' })
         .eq('id', restauranteId)
+      setCropFile(null)
       toast.success('Imagem de fundo enviada!')
     } catch (err: any) {
       toast.error('Erro no upload', { description: err.message })
@@ -260,10 +274,8 @@ export default function QRCodes() {
     const canvas = canvasRef.current
     if (!canvas) return
     try {
-      const a = document.createElement('a')
-      a.href = canvas.toDataURL('image/png')
-      a.download = `qrcode-${restaurantName.replace(/\s+/g, '-').toLowerCase()}.png`
-      a.click()
+      const blob = await canvasToBlob(canvas)
+      baixarBlob(blob, `qrcode-${restaurantName.replace(/\s+/g, '-').toLowerCase()}.png`)
     } catch {
       toast.error('Erro ao baixar PNG')
     }
@@ -273,7 +285,6 @@ export default function QRCodes() {
     const canvas = canvasRef.current
     if (!canvas) return
     try {
-      const imgData = canvas.toDataURL('image/png')
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
       const pw = pdf.internal.pageSize.getWidth()
       const ph = pdf.internal.pageSize.getHeight()
@@ -281,8 +292,8 @@ export default function QRCodes() {
       const h = w * (POSTER_H / POSTER_W)
       const x = (pw - w) / 2
       const y = (ph - h) / 2
-      pdf.addImage(imgData, 'PNG', x, y, w, h)
-      pdf.save(`qrcode-${restaurantName.replace(/\s+/g, '-').toLowerCase()}.pdf`)
+      pdf.addImage(canvas, 'PNG', x, y, w, h)
+      baixarBlob(pdf.output('blob'), `qrcode-${restaurantName.replace(/\s+/g, '-').toLowerCase()}.pdf`)
       toast.success('PDF baixado com sucesso!')
     } catch (err) {
       toast.error('Erro ao gerar PDF')
@@ -314,6 +325,8 @@ export default function QRCodes() {
   }
 
   const maxBar = Math.max(1, ...metricas.barras.map((b) => b.n))
+  // Qual preview mostrar: no wizard segue o passo; no modo pronto segue o seletor
+  const mostraQr = editando ? passo === 1 : previewAba === 'qr'
 
   return (
     <div className="flex-1">
@@ -389,140 +402,181 @@ export default function QRCodes() {
         {/* ── CONFIGURAÇÕES ── */}
         <TabsContent value="config" className="mt-0">
           <div className="grid gap-6 md:grid-cols-2">
+            {editando ? (
             <Card>
               <CardHeader>
-                <CardTitle>Personalização</CardTitle>
-                <CardDescription>Configure o QR impresso e a página que ele abre</CardDescription>
+                <CardTitle>{passo === 1 ? 'Passo 1 de 2 · QR impresso' : 'Passo 2 de 2 · Página do cliente'}</CardTitle>
+                <CardDescription>
+                  {passo === 1 ? 'Escolha a arte do QR que vai ser impresso' : 'Como fica a página que abre ao escanear'}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
-                {/* ── SEÇÃO 1: QR Code impresso ── */}
-                <div className="space-y-4">
-                  <button
-                    onClick={() => setPreviewAba('qr')}
-                    className="flex items-center gap-2 text-left w-full"
-                  >
-                    <QrCode className="h-4 w-4 text-primary" />
-                    <span className="text-sm font-semibold">QR Code (impresso)</span>
-                  </button>
-                  <div>
-                    <p className="text-[13px] font-medium mb-2">Modelo</p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {QR_TEMAS.map((t) => (
-                        <button
-                          key={t.id}
-                          onClick={() => setCfgEstilo(t.id)}
-                          className={cn('h-16 rounded-lg border-2 flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-all overflow-hidden',
-                            cfgEstilo === t.id ? 'border-primary ring-2 ring-primary/30' : 'border-transparent')}
-                          style={{ background: t.bg, color: t.texto }}
-                        >
-                          <span className="text-lg leading-none">{t.emojis[0]}</span>
-                          {t.nome}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-[13px] font-medium mb-2">Filtro</p>
-                    <div className="flex flex-wrap gap-2">
-                      {QR_FILTROS.map((f) => (
-                        <button
-                          key={f.id}
-                          onClick={() => setCfgFiltro(f.id)}
-                          className={cn('rounded-full border px-3 py-1.5 text-[12px] font-medium transition-all',
-                            cfgFiltro === f.id ? 'border-primary bg-primary/10 text-primary' : 'border-gray-200 hover:bg-muted')}
-                        >
-                          {f.nome}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* ── SEÇÃO 2: Página do cliente ── */}
-                <div className="space-y-4 pt-4 border-t">
-                  <button
-                    onClick={() => setPreviewAba('pagina')}
-                    className="flex items-center gap-2 text-left w-full"
-                  >
-                    <ExternalLink className="h-4 w-4 text-primary" />
-                    <span className="text-sm font-semibold">Página do cliente</span>
-                    <span className="text-[11px] text-muted-foreground">o que o QR abre</span>
-                  </button>
-
-                  <div>
-                    <p className="text-[13px] font-medium mb-2">Fundo da página</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => { setCfgModo('estilo'); setPreviewAba('pagina') }}
-                        className={cn('rounded-lg border-2 p-2.5 text-[13px] font-semibold transition-all',
-                          cfgModo === 'estilo' ? 'border-primary bg-primary/5 text-primary' : 'border-gray-200 hover:bg-muted')}
-                      >
-                        Usar o modelo do QR
-                      </button>
-                      <button
-                        onClick={() => { setCfgModo('upload'); setPreviewAba('pagina') }}
-                        className={cn('rounded-lg border-2 p-2.5 text-[13px] font-semibold transition-all',
-                          cfgModo === 'upload' ? 'border-primary bg-primary/5 text-primary' : 'border-gray-200 hover:bg-muted')}
-                      >
-                        Minha imagem
-                      </button>
-                    </div>
-                  </div>
-
-                  {cfgModo === 'upload' ? (
-                    <div className="space-y-3">
-                      <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-[12px] text-amber-800">
-                        Use uma imagem <b>vertical (retrato)</b> — ideal <b>1080×1920 px (9:16)</b> — para preencher bem a tela do celular. A gente só adiciona o botão do WhatsApp por cima.
-                      </div>
-                      {cfgImagem && (
-                        <img src={cfgImagem} alt="Fundo" className="w-full max-h-64 object-contain rounded-lg border bg-slate-50" />
-                      )}
-                      <label className="inline-flex items-center gap-2 text-sm font-medium cursor-pointer rounded-lg border px-3 py-2 hover:bg-muted">
-                        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
-                        {uploading ? 'Enviando…' : (cfgImagem ? 'Trocar imagem' : 'Enviar imagem')}
-                        <input type="file" accept="image/*" className="hidden"
-                          onChange={(e) => { const f = e.target.files?.[0]; if (f) onUploadFundo(f); e.target.value = '' }} />
-                      </label>
-                    </div>
-                  ) : (
+                {passo === 1 ? (
+                  /* ── PASSO 1: QR impresso ── */
+                  <>
                     <div>
-                      <p className="text-[13px] font-medium mb-1">Mensagem exibida</p>
-                      <textarea
-                        value={cfgMensagem}
-                        onChange={(e) => setCfgMensagem(e.target.value)}
-                        rows={2}
-                        placeholder="Ex: É rapidinho! Conte como foi sua experiência."
-                        className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
-                      />
+                      <p className="text-[13px] font-medium mb-2">Modelo</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {QR_TEMAS.map((t) => (
+                          <button
+                            key={t.id}
+                            onClick={() => setCfgEstilo(t.id)}
+                            className={cn('h-16 rounded-lg border-2 flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-all overflow-hidden',
+                              cfgEstilo === t.id ? 'border-primary ring-2 ring-primary/30' : 'border-transparent')}
+                            style={{ background: t.bg, color: t.texto }}
+                          >
+                            <span className="text-lg leading-none">{t.emojis[0]}</span>
+                            {t.nome}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  )}
-                </div>
+                    <div>
+                      <p className="text-[13px] font-medium mb-2">Filtro</p>
+                      <div className="flex flex-wrap gap-2">
+                        {QR_FILTROS.map((f) => (
+                          <button
+                            key={f.id}
+                            onClick={() => setCfgFiltro(f.id)}
+                            className={cn('rounded-full border px-3 py-1.5 text-[12px] font-medium transition-all',
+                              cfgFiltro === f.id ? 'border-primary bg-primary/10 text-primary' : 'border-gray-200 hover:bg-muted')}
+                          >
+                            {f.nome}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 pt-2">
+                      <Button variant="ghost" onClick={cancelarEdicao} className="text-muted-foreground">Cancelar</Button>
+                      <Button onClick={() => { setPasso(2); setPreviewAba('pagina') }} size="lg" className="gap-1.5 px-7 rounded-full shadow-md">
+                        Próximo <ArrowRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  /* ── PASSO 2: Página do cliente ── */
+                  <>
+                    <div>
+                      <p className="text-[13px] font-medium mb-2">Como a página vai aparecer?</p>
+                      <div className="grid grid-cols-1 gap-2">
+                        <button
+                          onClick={() => { setCfgModo('estilo'); setPreviewAba('pagina') }}
+                          className={cn('rounded-lg border-2 p-3 text-left transition-all',
+                            cfgModo === 'estilo' ? 'border-primary bg-primary/5' : 'border-gray-200 hover:bg-muted')}
+                        >
+                          <p className="text-[13px] font-semibold">Usar o modelo do QR</p>
+                          <p className="text-[11px] text-muted-foreground">A página fica com o mesmo estilo que você escolheu no QR.</p>
+                        </button>
+                        <button
+                          onClick={() => { setCfgModo('upload'); setPreviewAba('pagina') }}
+                          className={cn('rounded-lg border-2 p-3 text-left transition-all',
+                            cfgModo === 'upload' ? 'border-primary bg-primary/5' : 'border-gray-200 hover:bg-muted')}
+                        >
+                          <p className="text-[13px] font-semibold">Configurar diferente (minha imagem)</p>
+                          <p className="text-[11px] text-muted-foreground">Suba a sua própria arte de fundo para a página.</p>
+                        </button>
+                      </div>
+                    </div>
 
-                <Button onClick={salvarCfg} disabled={savingCfg} className="w-full">
-                  {savingCfg ? 'Salvando…' : 'Salvar'}
+                    {cfgModo === 'upload' ? (
+                      <div className="space-y-3">
+                        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-[12px] text-amber-800">
+                          Ao enviar, você <b>ajusta o recorte</b> arrastando e dando zoom dentro do formato do celular (9:16). A gente só adiciona o botão do WhatsApp por cima.
+                        </div>
+                        {cfgImagem && (
+                          <img src={cfgImagem} alt="Fundo" className="w-full max-h-64 object-contain rounded-lg border bg-slate-50" />
+                        )}
+                        <label className="inline-flex items-center gap-2 text-sm font-medium cursor-pointer rounded-lg border px-3 py-2 hover:bg-muted">
+                          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+                          {uploading ? 'Enviando…' : (cfgImagem ? 'Trocar imagem' : 'Enviar imagem')}
+                          <input type="file" accept="image/*" className="hidden"
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) setCropFile(f); e.target.value = '' }} />
+                        </label>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-[13px] font-medium mb-1">Mensagem exibida</p>
+                        <textarea
+                          value={cfgMensagem}
+                          onChange={(e) => setCfgMensagem(e.target.value)}
+                          rows={2}
+                          placeholder="Ex: É rapidinho! Conte como foi sua experiência."
+                          className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-2 pt-2">
+                      <Button variant="ghost" onClick={() => { setPasso(1); setPreviewAba('qr') }} className="gap-1.5 text-muted-foreground">
+                        <ArrowLeft className="h-4 w-4" /> Voltar
+                      </Button>
+                      <Button onClick={salvarCfg} disabled={savingCfg} size="lg" className="px-7 rounded-full shadow-md">
+                        {savingCfg ? 'Salvando…' : 'Salvar'}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+            ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>Seu QR Code está pronto</CardTitle>
+                <CardDescription>Baixe pelo botão "Baixar" acima e imprima</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-[13px] text-emerald-800 flex items-start gap-2">
+                  <Check className="h-4 w-4 mt-0.5 shrink-0" />
+                  QR e página configurados. Cada garçom tem o seu próprio QR na aba <b>Garçons</b>.
+                </div>
+                <dl className="text-sm divide-y divide-border rounded-lg border">
+                  <div className="flex justify-between px-3 py-2">
+                    <dt className="text-muted-foreground">Modelo</dt>
+                    <dd className="font-medium">{getTema(cfgEstilo).nome}</dd>
+                  </div>
+                  <div className="flex justify-between px-3 py-2">
+                    <dt className="text-muted-foreground">Filtro</dt>
+                    <dd className="font-medium">{getFiltro(cfgFiltro).nome}</dd>
+                  </div>
+                  <div className="flex justify-between px-3 py-2">
+                    <dt className="text-muted-foreground">Fundo da página</dt>
+                    <dd className="font-medium">{cfgModo === 'upload' ? 'Imagem própria' : 'Modelo do QR'}</dd>
+                  </div>
+                </dl>
+                <Button onClick={() => { setEditando(true); setPasso(1); setPreviewAba('qr') }} variant="outline" className="w-full">
+                  Personalizar
                 </Button>
               </CardContent>
             </Card>
+            )}
 
             {/* Preview: Página (celular) ou QR impresso */}
             <div className="flex flex-col items-center gap-4 rounded-xl border bg-slate-50/50 p-6">
-              <div className="inline-flex rounded-lg bg-white border p-1 text-sm">
-                <button
-                  onClick={() => setPreviewAba('pagina')}
-                  className={cn('px-3 py-1.5 rounded-md font-medium transition-colors', previewAba === 'pagina' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}
-                >
-                  Página
-                </button>
-                <button
-                  onClick={() => setPreviewAba('qr')}
-                  className={cn('px-3 py-1.5 rounded-md font-medium transition-colors', previewAba === 'qr' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}
-                >
-                  QR impresso
-                </button>
-              </div>
+              {/* No modo pronto, o dono alterna a prévia; no wizard ela segue o passo */}
+              {!editando && (
+                <div className="inline-flex rounded-lg bg-white border p-1 text-sm">
+                  <button
+                    onClick={() => setPreviewAba('pagina')}
+                    className={cn('px-3 py-1.5 rounded-md font-medium transition-colors', previewAba === 'pagina' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}
+                  >
+                    Página
+                  </button>
+                  <button
+                    onClick={() => setPreviewAba('qr')}
+                    className={cn('px-3 py-1.5 rounded-md font-medium transition-colors', previewAba === 'qr' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}
+                  >
+                    QR impresso
+                  </button>
+                </div>
+              )}
+              {editando && (
+                <p className="text-xs font-medium text-muted-foreground">
+                  {mostraQr ? 'Prévia do QR impresso' : 'Prévia da página do cliente'}
+                </p>
+              )}
 
               {/* Página (celular) */}
-              <div className={cn('flex flex-col items-center gap-3', previewAba === 'pagina' ? '' : 'hidden')}>
+              <div className={cn('flex flex-col items-center gap-3', !mostraQr ? '' : 'hidden')}>
                 <div className="w-[260px] h-[520px] rounded-[2.2rem] border-[10px] border-slate-800 bg-black overflow-hidden shadow-xl">
                   <LandingView
                     preview
@@ -544,7 +598,7 @@ export default function QRCodes() {
               </div>
 
               {/* QR impresso (canvas sempre montado para desenho/download) */}
-              <div className={cn('flex flex-col items-center gap-3', previewAba === 'qr' ? '' : 'hidden')}>
+              <div className={cn('flex flex-col items-center gap-3', mostraQr ? '' : 'hidden')}>
                 <div className="w-full max-w-[280px] overflow-hidden rounded-xl border shadow-lg bg-white">
                   <canvas ref={canvasRef} width={POSTER_W} height={POSTER_H} className="h-auto w-full object-contain" />
                 </div>
@@ -554,6 +608,15 @@ export default function QRCodes() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {cropFile && (
+        <ImageCropper
+          file={cropFile}
+          salvando={uploading}
+          onConfirm={enviarImagem}
+          onCancel={() => setCropFile(null)}
+        />
+      )}
     </div>
   )
 }
