@@ -7,7 +7,10 @@ import {
   PeriodInfo,
 } from '@/lib/queries/visao-geral'
 import { enviarMensagem } from '@/lib/openrouter'
-import { construirSystemPromptResumoExecutivo } from '@/lib/prompts-sistema'
+import {
+  construirSystemPromptResumoExecutivo,
+  construirSystemPromptRelatorioEstruturado,
+} from '@/lib/prompts-sistema'
 import { parseISO, format, getDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -163,7 +166,8 @@ export async function buscarEstatisticasRelatorio(
     .filter((f) => f.total >= MIN_AMOSTRA)
     .map((f) => ({ nome: f.nome, total: f.total, satisfacao: f.satisfacao! }))
     .sort((a, b) => a.satisfacao - b.satisfacao)
-  const faixaCritica = faixasComAmostra.length ? faixasComAmostra[0] : null
+  // Só faz sentido falar em faixa "mais fraca" se houver com o que comparar
+  const faixaCritica = faixasComAmostra.length > 1 ? faixasComAmostra[0] : null
 
   return {
     clientesUnicos,
@@ -209,6 +213,97 @@ export async function gerarDadosRelatorio(restauranteId: number, periodo: '7d' |
     restauranteId,
     periodo,
     geradoEm: new Date().toISOString(),
+  }
+}
+
+export interface AnaliseRelatorio {
+  titulo: string
+  resumo: string
+  ponto_forte: string
+  ponto_fraco: string
+  leitura_categorias: string
+  leitura_clientes: string
+  recomendacoes: string[]
+  alerta_amostra: string
+  porIa: boolean
+}
+
+/** Análise escrita sem IA — usada quando a chamada falha ou volta inválida. */
+function analiseFallback(dados: any): AnaliseRelatorio {
+  const k = dados.kpis || {}
+  const e = dados.estatisticas || {}
+  const comparar = k.hasPrevData && k.prevConfiavel
+  return {
+    titulo: `${k.totalFeedbacks || 0} avaliações no período`,
+    resumo: [
+      `No período (${String(dados.periodo || '').toLowerCase()}), o restaurante recebeu ${k.totalFeedbacks || 0} avaliações de ${e.clientesUnicos || 0} clientes.`,
+      `O índice de satisfação ficou em ${k.sentiment ?? 0} de 100.`,
+      comparar ? `No período anterior era ${(k.sentiment ?? 0) - parseInt(String(k.sentimentTrend), 10) || 0} de 100.` : '',
+    ].filter(Boolean).join(' '),
+    ponto_forte: k.positivos
+      ? `${k.positivos} de ${k.totalFeedbacks} avaliações foram positivas (${k.positivePercent}%).`
+      : 'Nenhuma avaliação positiva registrada no período.',
+    ponto_fraco:
+      k.criticalTheme && k.criticalTheme !== 'Nenhum'
+        ? `O tema "${k.criticalTheme}" concentrou reclamações: ${k.criticalPercent}% das avaliações sobre ele foram negativas.`
+        : `${k.negativos || 0} avaliações negativas no período.`,
+    leitura_categorias: (e.porCategoria || [])
+      .map((c: any) => `${c.nome}: ${c.satisfacao} de 100 em ${c.total} avaliações.`)
+      .join(' '),
+    leitura_clientes: `${e.clientesUnicos || 0} clientes avaliaram, ${e.clientesRecorrentes || 0} deles mais de uma vez.`,
+    recomendacoes:
+      k.criticalTheme && k.criticalTheme !== 'Nenhum'
+        ? [`Revisar o que os clientes relataram sobre "${k.criticalTheme}".`]
+        : ['Manter o padrão e seguir coletando avaliações.'],
+    alerta_amostra:
+      (k.totalFeedbacks || 0) < 10
+        ? 'A quantidade de avaliações ainda é pequena, então esta leitura é preliminar.'
+        : '',
+    porIa: false,
+  }
+}
+
+/**
+ * Pede à IA a análise estruturada (campo a campo) para o template do PDF.
+ * Se a IA falhar ou devolver algo inválido, cai no texto calculado.
+ */
+export async function gerarAnaliseRelatorio(dados: any): Promise<AnaliseRelatorio> {
+  const fallback = analiseFallback(dados)
+  try {
+    const systemPrompt = construirSystemPromptRelatorioEstruturado(dados)
+    const resposta = await enviarMensagem(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: 'Gere a análise do relatório no formato JSON pedido.' },
+      ],
+      { response_format: { type: 'json_object' } },
+    )
+
+    const bruto =
+      typeof resposta === 'string'
+        ? JSON.parse(resposta.replace(/^```(?:json)?|```$/g, '').trim())
+        : (resposta as any)
+
+    const texto = (v: any, padrao: string) =>
+      typeof v === 'string' && v.trim() ? v.trim() : padrao
+
+    return {
+      titulo: texto(bruto.titulo, fallback.titulo),
+      resumo: texto(bruto.resumo, fallback.resumo),
+      ponto_forte: texto(bruto.ponto_forte, fallback.ponto_forte),
+      ponto_fraco: texto(bruto.ponto_fraco, fallback.ponto_fraco),
+      leitura_categorias: texto(bruto.leitura_categorias, fallback.leitura_categorias),
+      leitura_clientes: texto(bruto.leitura_clientes, fallback.leitura_clientes),
+      recomendacoes:
+        Array.isArray(bruto.recomendacoes) && bruto.recomendacoes.length
+          ? bruto.recomendacoes.filter((r: any) => typeof r === 'string' && r.trim()).slice(0, 4)
+          : fallback.recomendacoes,
+      alerta_amostra: typeof bruto.alerta_amostra === 'string' ? bruto.alerta_amostra.trim() : '',
+      porIa: true,
+    }
+  } catch (err) {
+    console.warn('Análise por IA indisponível, usando texto calculado:', err)
+    return fallback
   }
 }
 

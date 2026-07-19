@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  FileText, Download, FileDown, Users, Smile, ThumbsUp, ThumbsDown,
+  FileText, Download, FileDown, Users, Smile, ThumbsUp, Sparkles,
   AlertTriangle, Loader2, PartyPopper, UserCheck, Repeat, CalendarDays, Clock,
 } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from 'recharts'
@@ -14,7 +14,10 @@ import {
 import {
   buscarKpis, buscarTendencia, getPeriodDates, PeriodInfo,
 } from '@/lib/queries/visao-geral'
-import { buscarEstatisticasRelatorio, gerarResumoExecutivo, EstatisticasRelatorio } from '@/lib/queries/relatorios'
+import {
+  buscarEstatisticasRelatorio, gerarAnaliseRelatorio,
+  EstatisticasRelatorio, AnaliseRelatorio,
+} from '@/lib/queries/relatorios'
 import { gerarPdfRelatorio } from '@/lib/pdf/gerar-pdf-relatorio'
 import { supabase } from '@/lib/supabase/client'
 import { useUserProfile } from '@/hooks/use-user-profile'
@@ -39,20 +42,6 @@ function baixar(blob: Blob, filename: string) {
   a.click()
   document.body.removeChild(a)
   setTimeout(() => URL.revokeObjectURL(url), 2000)
-}
-
-/** Resumo sem IA — usado como fallback se a chamada à IA falhar. */
-function resumoDeterministico(kpis: any, periodo: PeriodInfo, stats: EstatisticasRelatorio) {
-  return [
-    `No período (${PERIOD_LABEL[periodo].toLowerCase()}), o restaurante recebeu ${kpis.totalFeedbacks} ${kpis.totalFeedbacks === 1 ? 'avaliação' : 'avaliações'} de ${stats.clientesUnicos || kpis.totalFeedbacks} clientes.`,
-    kpis.totalFeedbacks > 0
-      ? `O índice de satisfação foi ${kpis.sentiment} de 100, com ${kpis.positivos} avaliações positivas (${kpis.positivePercent}%) e ${kpis.negativos} negativas (${kpis.negativePercent}%).`
-      : '',
-    kpis.criticalTheme && kpis.criticalTheme !== 'Nenhum'
-      ? `O tema que mais preocupa é "${kpis.criticalTheme}", com ${kpis.criticalPercent}% de avaliações negativas.`
-      : '',
-    kpis.totalFeedbacks < 10 ? 'A amostra ainda é pequena, então a leitura é preliminar.' : '',
-  ].filter(Boolean).join(' ')
 }
 
 function SatisfacaoTooltip({ active, payload }: { active?: boolean; payload?: any[] }) {
@@ -100,6 +89,8 @@ export default function Reports() {
   const [nomeRestaurante, setNomeRestaurante] = useState('Restaurante')
   const [gerandoPdf, setGerandoPdf] = useState(false)
   const [gerandoCsv, setGerandoCsv] = useState(false)
+  const [analise, setAnalise] = useState<AnaliseRelatorio | null>(null)
+  const [analisando, setAnalisando] = useState(false)
 
   const restauranteId = profile?.restaurante_id ?? null
 
@@ -107,6 +98,7 @@ export default function Reports() {
     if (profileLoading) return
     const carregar = async () => {
       setLoading(true)
+      setAnalise(null) // a leitura da IA é por período
       try {
         const [k, e, t] = await Promise.all([
           buscarKpis(restauranteId, period),
@@ -209,49 +201,66 @@ export default function Reports() {
     }
   }
 
-  // ── PDF com resumo executivo escrito pela IA (fallback: texto calculado) ───
+  /** Monta o pacote de dados que alimenta a IA e o PDF. */
+  const montarDados = async () => {
+    const { currentStart } = getPeriodDates(period)
+    const [fbRes, insRes] = await Promise.all([
+      restauranteId
+        ? supabase.from('feedbacks_restaurante')
+            .select('categoria, sentimento, texto_original, resumo')
+            .eq('restaurante_id', restauranteId)
+            .gte('created_at', currentStart.toISOString())
+            .order('created_at', { ascending: false }).limit(15)
+        : Promise.resolve({ data: [] as any[] }),
+      restauranteId
+        ? supabase.from('insights').select('titulo, prioridade')
+            .eq('restaurante_id', restauranteId).eq('ativo', true)
+            .order('created_at', { ascending: false }).limit(8)
+        : Promise.resolve({ data: [] as any[] }),
+    ])
+    return {
+      periodo: PERIOD_LABEL[period],
+      geradoEm: new Date().toISOString(),
+      kpis,
+      estatisticas: stats,
+      categorias: stats?.porCategoria ?? [],
+      insights: insRes.data || [],
+      feedbacks: fbRes.data || [],
+    }
+  }
+
+  /** Reaproveita a análise já gerada no período (evita chamar a IA duas vezes). */
+  const obterAnalise = async (dados: any): Promise<AnaliseRelatorio> => {
+    if (analise) return analise
+    const a = await gerarAnaliseRelatorio(dados)
+    setAnalise(a)
+    return a
+  }
+
+  const handleAnalisar = async () => {
+    if (!kpis || !stats) return
+    setAnalisando(true)
+    try {
+      const a = await gerarAnaliseRelatorio(await montarDados())
+      setAnalise(a)
+      if (!a.porIa) toast.warning('A IA não respondeu — mostrando a leitura calculada.')
+    } catch (e: any) {
+      toast.error('Erro ao gerar a análise', { description: e.message })
+    } finally {
+      setAnalisando(false)
+    }
+  }
+
+  // ── PDF com análise estruturada escrita pela IA ────────────────────────────
   const handleExportPdf = async () => {
     if (!kpis || !stats) return
     setGerandoPdf(true)
     try {
-      const { currentStart } = getPeriodDates(period)
-      const [fbRes, insRes] = await Promise.all([
-        restauranteId
-          ? supabase.from('feedbacks_restaurante')
-              .select('categoria, sentimento, texto_original, resumo')
-              .eq('restaurante_id', restauranteId)
-              .gte('created_at', currentStart.toISOString())
-              .order('created_at', { ascending: false }).limit(15)
-          : Promise.resolve({ data: [] as any[] }),
-        restauranteId
-          ? supabase.from('insights').select('titulo, prioridade')
-              .eq('restaurante_id', restauranteId).eq('ativo', true)
-              .order('created_at', { ascending: false }).limit(8)
-          : Promise.resolve({ data: [] as any[] }),
-      ])
-
-      const dados = {
-        periodo: PERIOD_LABEL[period],
-        geradoEm: new Date().toISOString(),
-        kpis,
-        estatisticas: stats,
-        categorias: stats.porCategoria,
-        insights: insRes.data || [],
-        feedbacks: fbRes.data || [],
-      }
-
-      // Tenta o resumo por IA; se falhar, usa o texto calculado
-      let resumo = ''
-      try {
-        resumo = String(await gerarResumoExecutivo(dados)).trim()
-      } catch (err) {
-        console.warn('Resumo por IA indisponível, usando fallback:', err)
-      }
-      if (!resumo) resumo = resumoDeterministico(kpis, period, stats)
-
-      const blob = await gerarPdfRelatorio(dados, resumo, nomeRestaurante)
+      const dados = await montarDados()
+      const a = await obterAnalise(dados)
+      const blob = await gerarPdfRelatorio(dados, a, nomeRestaurante)
       baixar(blob, `relatorio-${nomeRestaurante.replace(/\s+/g, '-').toLowerCase()}-${period}.pdf`)
-      toast.success('PDF gerado!')
+      toast.success(a.porIa ? 'PDF gerado com análise da IA!' : 'PDF gerado (sem IA).')
     } catch (e: any) {
       console.error(e)
       toast.error('Erro ao gerar o PDF', { description: e.message })
@@ -272,9 +281,16 @@ export default function Reports() {
     )
   }
 
-  const trendTexto = (t: string, hasPrev: boolean) =>
-    hasPrev ? `${t} vs. período anterior`
-      : kpis.totalFeedbacks > 0 ? 'primeiro período com dados' : 'sem dados anteriores'
+  // Só mostra variação quando o período anterior tem base suficiente:
+  // "+200%" saindo de 1 avaliação engana mais do que informa.
+  const comparavel = kpis.hasPrevData && kpis.prevConfiavel
+  const diasComDados = tendencia.filter((t) => t.avaliacoes > 0).length
+  const trendTexto = (t: string) =>
+    comparavel
+      ? `${t} vs. período anterior`
+      : kpis.hasPrevData
+        ? `período anterior teve só ${kpis.prevTotal} avaliação${kpis.prevTotal !== 1 ? 'ões' : ''}`
+        : 'primeiro período com dados'
 
   return (
     <div className="flex-1 space-y-6 p-6 md:p-8 max-w-7xl mx-auto w-full animate-fade-in-up">
@@ -333,7 +349,7 @@ export default function Reports() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-foreground">{kpis.totalFeedbacks}</div>
-                <p className="text-xs text-muted-foreground mt-1">{trendTexto(kpis.totalTrend, kpis.hasPrevData)}</p>
+                <p className="text-xs text-muted-foreground mt-1">{trendTexto(kpis.totalTrend)}</p>
               </CardContent>
             </Card>
 
@@ -347,7 +363,7 @@ export default function Reports() {
                   {kpis.sentiment}<span className="text-lg font-medium text-muted-foreground">/100</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {kpis.hasPrevData ? `${kpis.sentimentTrend} · ` : ''}quanto maior, melhor
+                  {comparavel ? `${kpis.sentimentTrend} · ` : ''}quanto maior, melhor
                 </p>
               </CardContent>
             </Card>
@@ -365,15 +381,121 @@ export default function Reports() {
 
             <Card className="bg-white shadow-sm border-border/60">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Avaliações negativas</CardTitle>
-                <ThumbsDown className="h-4 w-4 text-rose-500" />
+                <CardTitle className="text-sm font-medium text-muted-foreground">Clientes que avaliaram</CardTitle>
+                <UserCheck className="h-4 w-4 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold text-rose-500">{kpis.negativePercent}%</div>
-                <p className="text-xs text-muted-foreground mt-1">{kpis.negativos} de {kpis.totalFeedbacks} avaliações</p>
+                <div className="text-3xl font-bold text-foreground">{stats.clientesUnicos}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {stats.clientesRecorrentes > 0
+                    ? `${stats.clientesRecorrentes} avaliaram mais de uma vez`
+                    : 'nenhum avaliou duas vezes ainda'}
+                </p>
               </CardContent>
             </Card>
           </div>
+
+          {/* Distribuição — deixa as neutras visíveis e mostra que soma 100% */}
+          <Card className="bg-white shadow-sm border-border/60">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold">Como as avaliações se dividem</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-3">
+              <div className="flex h-3.5 w-full overflow-hidden rounded-full bg-muted">
+                {[
+                  { n: kpis.positivos, cor: 'bg-emerald-500' },
+                  { n: kpis.neutros, cor: 'bg-slate-300' },
+                  { n: kpis.negativos, cor: 'bg-rose-500' },
+                ].map((s, i) =>
+                  s.n > 0 ? (
+                    <div key={i} className={s.cor} style={{ width: `${(s.n / kpis.totalFeedbacks) * 100}%` }} />
+                  ) : null,
+                )}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1.5 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  Positivas: <b className="text-foreground">{kpis.positivos}</b> ({kpis.positivePercent}%)
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+                  Neutras: <b className="text-foreground">{kpis.neutros}</b>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
+                  Negativas: <b className="text-foreground">{kpis.negativos}</b> ({kpis.negativePercent}%)
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Leitura em linguagem simples, escrita pela IA */}
+          <Card className="border-primary/20 bg-primary/[0.03] shadow-none">
+            <CardContent className="p-5">
+              {analise ? (
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-primary">
+                        {analise.porIa ? 'Leitura do período (gerada por IA)' : 'Leitura do período (calculada)'}
+                      </p>
+                      <p className="text-lg font-bold text-foreground leading-snug mt-0.5">{analise.titulo}</p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{analise.resumo}</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border-l-2 border-emerald-500 bg-white p-3">
+                      <p className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wide">Ponto forte</p>
+                      <p className="text-sm text-foreground mt-1">{analise.ponto_forte}</p>
+                    </div>
+                    <div className="rounded-lg border-l-2 border-rose-500 bg-white p-3">
+                      <p className="text-[11px] font-semibold text-rose-700 uppercase tracking-wide">Precisa de atenção</p>
+                      <p className="text-sm text-foreground mt-1">{analise.ponto_fraco}</p>
+                    </div>
+                  </div>
+                  {analise.recomendacoes.length > 0 && (
+                    <div>
+                      <p className="text-sm font-semibold text-foreground mb-2">O que fazer agora</p>
+                      <ol className="space-y-1.5">
+                        {analise.recomendacoes.map((r, i) => (
+                          <li key={i} className="flex gap-2.5 text-sm text-muted-foreground">
+                            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-white">
+                              {i + 1}
+                            </span>
+                            {r}
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                  {analise.alerta_amostra && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                      {analise.alerta_amostra}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-foreground">Não entendeu os números?</p>
+                    <p className="text-sm text-muted-foreground">
+                      A IA lê tudo isso e te explica em português o que aconteceu e o que fazer.
+                    </p>
+                  </div>
+                  <Button onClick={handleAnalisar} disabled={analisando} className="shrink-0">
+                    {analisando ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                    {analisando ? 'Analisando…' : 'Explicar para mim'}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Tema crítico */}
           {kpis.criticalTheme && kpis.criticalTheme !== 'Nenhum' ? (
@@ -410,7 +532,9 @@ export default function Reports() {
             <CardHeader className="pb-0">
               <CardTitle className="text-base font-semibold">Evolução da satisfação</CardTitle>
               <p className="text-xs text-muted-foreground">
-                Índice de 0 a 100 ao longo do período. A linha tracejada é o meio da escala (50).
+                {diasComDados <= 3
+                  ? `Só ${diasComDados} dia${diasComDados !== 1 ? 's' : ''} teve avaliação no período — cada ponto é um dia, a linha apenas os liga.`
+                  : 'Índice de 0 a 100 ao longo do período. A linha tracejada é o meio da escala (50).'}
               </p>
             </CardHeader>
             <CardContent className="pt-6">
@@ -434,9 +558,18 @@ export default function Reports() {
                   />
                   <ReferenceLine y={50} stroke="hsl(var(--border))" strokeDasharray="4 2" strokeOpacity={0.7} />
                   <ChartTooltip content={<SatisfacaoTooltip />} />
+                  {/* linear (não "monotone"): curva suave inventaria variação entre dias sem dado */}
                   <Area
-                    type="monotone" dataKey="sentiment" stroke="hsl(var(--chart-1))" strokeWidth={2.5}
+                    type="linear" dataKey="sentiment" stroke="hsl(var(--chart-1))" strokeWidth={2.5}
                     fillOpacity={1} fill="url(#gradSatisfacao)" connectNulls
+                    dot={(props: any) => {
+                      const { cx, cy, payload, index } = props
+                      if (!cx || !cy || !payload.avaliacoes) return <g key={`d-${index}`} />
+                      return (
+                        <circle key={`d-${index}`} cx={cx} cy={cy} r={4}
+                          fill="hsl(var(--chart-1))" stroke="white" strokeWidth={2} />
+                      )
+                    }}
                   />
                 </AreaChart>
               </ChartContainer>
@@ -474,32 +607,32 @@ export default function Reports() {
             </Card>
           )}
 
-          {/* Recortes extras */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatMini
-              icon={UserCheck} label="Clientes únicos" valor={String(stats.clientesUnicos)}
-              detalhe={`${stats.avaliacoesPorCliente} avaliação(ões) por cliente`}
-            />
-            <StatMini
-              icon={Repeat} label="Clientes que voltaram a avaliar"
-              valor={String(stats.clientesRecorrentes)}
-              detalhe={stats.clientesRecorrentes === 0 ? 'ninguém avaliou 2x ainda' : 'avaliaram mais de uma vez'}
-            />
-            <StatMini
-              icon={CalendarDays} label="Melhor dia da semana"
-              valor={stats.melhorDia ? stats.melhorDia.nome : '—'}
-              detalhe={stats.melhorDia
-                ? `${stats.melhorDia.satisfacao}/100 · ${stats.melhorDia.total} avaliações`
-                : 'ainda sem dados suficientes'}
-            />
-            <StatMini
-              icon={Clock} label="Horário mais movimentado"
-              valor={stats.faixaMaisMovimentada ? stats.faixaMaisMovimentada.nome.split(' ')[0] : '—'}
-              detalhe={stats.faixaMaisMovimentada
-                ? `${stats.faixaMaisMovimentada.total} avaliações · ${stats.faixaMaisMovimentada.satisfacao}/100`
-                : 'ainda sem dados suficientes'}
-            />
-          </div>
+          {/* Recortes extras — só os que têm dado de verdade */}
+          {(stats.faixaMaisMovimentada || stats.melhorDia || stats.avaliacoesPorCliente > 0) && (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {stats.avaliacoesPorCliente > 0 && (
+                <StatMini
+                  icon={Repeat} label="Avaliações por cliente"
+                  valor={String(stats.avaliacoesPorCliente)}
+                  detalhe={`${stats.clientesUnicos} clientes diferentes`}
+                />
+              )}
+              {stats.faixaMaisMovimentada && (
+                <StatMini
+                  icon={Clock} label="Horário com mais avaliações"
+                  valor={stats.faixaMaisMovimentada.nome.split(' ')[0]}
+                  detalhe={`${stats.faixaMaisMovimentada.total} avaliações · satisfação ${stats.faixaMaisMovimentada.satisfacao}/100`}
+                />
+              )}
+              {stats.melhorDia && (
+                <StatMini
+                  icon={CalendarDays} label="Melhor dia da semana"
+                  valor={stats.melhorDia.nome}
+                  detalhe={`${stats.melhorDia.satisfacao}/100 · ${stats.melhorDia.total} avaliações`}
+                />
+              )}
+            </div>
+          )}
 
           {/* Pontos de atenção derivados dos recortes */}
           {(stats.piorDia || stats.faixaCritica || stats.piorCategoria) && (

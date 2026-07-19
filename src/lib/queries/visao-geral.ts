@@ -30,6 +30,8 @@ export interface DashboardData {
     criticalTheme: string
     criticalPercent: number
     hasPrevData: boolean
+    prevConfiavel: boolean
+    prevTotal: number
     positivos: number
     negativos: number
     neutros: number
@@ -79,6 +81,9 @@ export const buscarKpis = async (restauranteId: number | null, periodo: PeriodIn
   const totalFeedbacks = currentFeedbacks.length
   const prevTotal = previousFeedbacks.length
   const hasPrevData = prevTotal > 0
+  // Comparar 3 avaliações contra 1 gera "+200%" que engana o dono.
+  // Só tratamos a variação como confiável com uma base mínima.
+  const prevConfiavel = prevTotal >= 3
 
   // Trend de total: só faz sentido comparar quando há dados anteriores
   let totalTrend: string
@@ -172,6 +177,8 @@ export const buscarKpis = async (restauranteId: number | null, periodo: PeriodIn
     criticalTheme,
     criticalPercent,
     hasPrevData,
+    prevConfiavel,
+    prevTotal,
     positivos,
     negativos,
     neutros,
