@@ -7,10 +7,45 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+// @ts-ignore - Supabase.ai existe no runtime das edge functions
+const aiSession = new Supabase.ai.Session('gte-small')
+
+function blocoPerfil(r: any): string {
+  const p = (r?.perfil_restaurante as any) || {}
+  const linhas = [
+    r?.nome_restaurante ? `Nome: ${r.nome_restaurante}` : '',
+    r?.tipo_culinaria ? `Tipo de cozinha: ${r.tipo_culinaria}` : '',
+    p.estilo ? `Estilo: ${p.estilo}` : '',
+    r?.numero_mesas ? `Mesas: ${r.numero_mesas}` : '',
+    p.num_funcionarios ? `Equipe: ${p.num_funcionarios} funcionarios` : '',
+    p.faixa_preco ? `Ticket medio: ${p.faixa_preco}` : '',
+    p.publico_alvo ? `Publico: ${p.publico_alvo}` : '',
+    p.desafios ? `Desafios relatados pelo dono: ${p.desafios}` : '',
+    r?.detalhes ? `Descricao do dono: ${r.detalhes}` : '',
+  ].filter(Boolean)
+  return linhas.length ? linhas.join('\n') : 'Perfil ainda nao preenchido.'
+}
+
+async function buscarConhecimento(db: any, restauranteId: number, consulta: string): Promise<string> {
+  try {
+    if (!consulta.trim()) return ''
+    const emb = await aiSession.run(consulta.slice(0, 4000), { mean_pool: true, normalize: true })
+    const { data } = await db.rpc('buscar_conhecimento_para', {
+      consulta_embedding: emb,
+      p_restaurante_id: restauranteId,
+      consulta_texto: consulta.slice(0, 500),
+      limite: 6,
+    })
+    if (!data || !data.length) return ''
+    return data.map((t: any, i: number) => `[${i + 1}] (${t.titulo})\n${t.conteudo}`).join('\n\n')
+  } catch (e) {
+    console.error('Falha na busca de conhecimento:', e)
+    return ''
   }
+}
+
+serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
     const body = await req.json().catch(() => ({}))
@@ -18,81 +53,52 @@ serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: { persistSession: false },
-    })
+    const db = createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } })
 
     let targetRestauranteId = restaurante_id
     if (!targetRestauranteId) {
-      const { data: firstRest } = await supabaseAdmin
+      const { data: firstRest } = await db
         .from('restaurantes')
         .select('id')
         .eq('ativo', true)
         .limit(1)
         .single()
-
-      if (firstRest) {
-        targetRestauranteId = firstRest.id
-      }
+      if (firstRest) targetRestauranteId = firstRest.id
     }
 
-    // Verifica se já existem sugestões aguardando aprovação
-    // Try filtered by restaurante_id first; fallback to global if column doesn't exist yet
-    let countBase = supabaseAdmin
+    // Nao gera novas sugestoes enquanto ha sugestoes aguardando aprovacao
+    let countBase = db
       .from('acoes_operacionais')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'SUGERIDA')
-
-    let { count, error: countErr } = targetRestauranteId
+    const { count } = targetRestauranteId
       ? await countBase.eq('restaurante_id', targetRestauranteId)
       : await countBase
 
-    if (countErr) {
-      if (countErr.code === '42703') {
-        // Column doesn't exist yet — fall back to global count
-        const fallback = await supabaseAdmin
-          .from('acoes_operacionais')
-          .select('*', { count: 'exact', head: true })
-          .eq('status', 'SUGERIDA')
-        count = fallback.count
-        if (fallback.error) throw fallback.error
-      } else {
-        throw countErr
-      }
-    }
-
     if (count && count > 0) {
-      return new Response(
-        JSON.stringify({ status: 'aguardando_aprovacao', sugestoes_criadas: 0 }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      )
+      return new Response(JSON.stringify({ status: 'aguardando_aprovacao', sugestoes_criadas: 0 }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
 
+    // Configuracao (mora em restaurantes) + perfil para contexto
     let maxSugestoes = 3
+    let restauranteData: any = null
     if (targetRestauranteId) {
-      const { data: config } = await supabaseAdmin
+      const { data: r } = await db
         .from('restaurantes')
-        .select('config_insights')
+        .select('nome_restaurante, tipo_culinaria, numero_mesas, detalhes, perfil_restaurante, config_insights, mascote_config')
         .eq('id', targetRestauranteId)
         .single()
-
-      if (config?.config_insights) {
-        const ci = config.config_insights as any
-        if (ci.max_sugestoes_acoes_por_ciclo) {
-          maxSugestoes = ci.max_sugestoes_acoes_por_ciclo
-        }
-      }
+      restauranteData = r
+      const ci = (r?.config_insights as any) || {}
+      if (ci.max_sugestoes_acoes_por_ciclo) maxSugestoes = ci.max_sugestoes_acoes_por_ciclo
     }
 
-    // Busca insights ativos para analise
-    let insightsQuery = supabaseAdmin.from('insights').select('*').eq('ativo', true)
-
-    if (targetRestauranteId) {
-      insightsQuery = insightsQuery.eq('restaurante_id', targetRestauranteId)
-    }
-
+    // Insights ativos
+    let insightsQuery = db.from('insights').select('*').eq('ativo', true)
+    if (targetRestauranteId) insightsQuery = insightsQuery.eq('restaurante_id', targetRestauranteId)
     const { data: insights, error: insightsErr } = await insightsQuery
-
     if (insightsErr) throw insightsErr
 
     if (!insights || insights.length === 0) {
@@ -101,14 +107,7 @@ serve(async (req: Request) => {
       })
     }
 
-    // Ordena prioridade: URGENTE > IMPORTANTE > OBSERVACAO
-    const prioridadePeso: Record<string, number> = {
-      URGENTE: 3,
-      IMPORTANTE: 2,
-      OBSERVACAO: 1,
-      OBSERVAÇÃO: 1,
-    }
-
+    const prioridadePeso: Record<string, number> = { URGENTE: 3, IMPORTANTE: 2, OBSERVACAO: 1 }
     const insightsOrdenados = insights.sort((a, b) => {
       const pA = prioridadePeso[a.prioridade?.toUpperCase()] || 0
       const pB = prioridadePeso[b.prioridade?.toUpperCase()] || 0
@@ -116,60 +115,58 @@ serve(async (req: Request) => {
       return (b.feedbacks_relacionados || 0) - (a.feedbacks_relacionados || 0)
     })
 
-    // Filtra para garantir relevância: feedbacks_relacionados >= 2 (exceto URGENTE)
     const insightsValidos = insightsOrdenados
-      .filter((i) => {
-        if (i.prioridade?.toUpperCase() === 'URGENTE') return true
-        return (i.feedbacks_relacionados || 0) >= 2
-      })
+      .filter((i) => i.prioridade?.toUpperCase() === 'URGENTE' || (i.feedbacks_relacionados || 0) >= 2)
       .slice(0, 10)
 
     if (insightsValidos.length === 0) {
-      return new Response(
-        JSON.stringify({ status: 'sem_insights_relevantes', sugestoes_criadas: 0 }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
-      )
+      return new Response(JSON.stringify({ status: 'sem_insights_relevantes', sugestoes_criadas: 0 }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
 
     const apiKey = Deno.env.get('OPENROUTER_API_KEY')
     const modelo = Deno.env.get('OPENROUTER_MODELO') || 'google/gemini-2.5-flash-lite'
+    if (!apiKey) throw new Error('OPENROUTER_API_KEY nao configurada')
 
-    if (!apiKey) {
-      throw new Error('OPENROUTER_API_KEY não configurada')
-    }
+    // Anotacoes da IA
+    const { data: memoria } = targetRestauranteId
+      ? await db
+          .from('memoria_assistente')
+          .select('fato')
+          .eq('restaurante_id', targetRestauranteId)
+          .order('created_at', { ascending: false })
+          .limit(20)
+      : { data: [] as any[] }
 
-    const prompt = `Você é um assistente especialista em gestão de restaurantes.
-Baseado na lista de insights abaixo, gere ATÉ ${maxSugestoes} sugestões de ações operacionais.
-Foque nos problemas mais valiosos (maior impacto e urgência).
+    // Boas praticas relevantes aos temas dos insights
+    const consultaConhecimento = insightsValidos
+      .map((i) => `${i.categoria || ''}: ${i.titulo}. ${i.descricao || ''}`)
+      .join('\n')
+      .slice(0, 3500)
+    const conhecimento = targetRestauranteId
+      ? await buscarConhecimento(db, targetRestauranteId, consultaConhecimento)
+      : ''
 
-Regras OBRIGATÓRIAS para cada ação:
-1. "titulo_acao": Título curto e claro
-2. "plano_detalhado": Um norteador genérico de como resolver o problema, orientando a equipe sem prescrever regras rígidas demais.
-3. "prioridade": Herde do insight principal que motivou a ação (URGENTE, IMPORTANTE ou OBSERVACAO).
-4. "categoria": Herde ou defina a categoria (Ex: Serviço, Comida, Ambiente, Geral).
+    const prompt = `Voce e um consultor especialista em gestao de restaurantes. Com base nos insights abaixo, gere ATE ${maxSugestoes} acoes operacionais concretas para o dono resolver os problemas mais valiosos (maior impacto e urgencia).
 
-Retorne SOMENTE um JSON Array neste formato:
-[
-  {
-    "titulo_acao": "...",
-    "plano_detalhado": "...",
-    "prioridade": "...",
-    "categoria": "..."
-  }
-]
+## Sobre este restaurante
+${blocoPerfil(restauranteData)}
+${memoria?.length ? `\n## O que se sabe deste restaurante (anotacoes)\n${memoria.map((m: any) => `- ${m.fato}`).join('\n')}` : ''}
+${conhecimento ? `\n## Boas praticas de referencia (use para montar o plano)\n${conhecimento}` : ''}
 
-Insights disponíveis:
-${JSON.stringify(
-  insightsValidos.map((i) => ({
-    id: i.id,
-    prioridade: i.prioridade,
-    categoria: i.categoria,
-    titulo: i.titulo,
-    descricao: i.descricao,
-  })),
-)}`
+## Regras para cada acao
+1. "titulo_acao": titulo curto e claro do que precisa ser feito.
+2. "plano_detalhado": um plano pratico em passos, adaptado a ESTE restaurante (tamanho, equipe, tipo de cozinha). Quando uma boa pratica de referencia se aplicar, incorpore-a de forma concreta. Nada de conselho generico como "melhore o atendimento".
+3. "prioridade": herde do insight principal (URGENTE, IMPORTANTE ou OBSERVACAO).
+4. "categoria": Servico, Comida, Ambiente, Preco, Agilidade ou Geral.
+Escreva em portugues do Brasil, direto.
+
+## Formato (retorne SOMENTE este JSON)
+{ "acoes": [ { "titulo_acao": "...", "plano_detalhado": "...", "prioridade": "...", "categoria": "..." } ] }
+
+## Insights disponiveis
+${JSON.stringify(insightsValidos.map((i) => ({ prioridade: i.prioridade, categoria: i.categoria, titulo: i.titulo, descricao: i.descricao, sugestao: i.sugestao })))}`
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -185,9 +182,7 @@ ${JSON.stringify(
       }),
     })
 
-    if (!response.ok) {
-      throw new Error(`OpenRouter API Error: ${await response.text()}`)
-    }
+    if (!response.ok) throw new Error(`OpenRouter API Error: ${await response.text()}`)
 
     const data = await response.json()
     const content = data.choices?.[0]?.message?.content ?? '[]'
@@ -197,28 +192,22 @@ ${JSON.stringify(
       const parsed = JSON.parse(content)
       acoesGeradas = Array.isArray(parsed) ? parsed : parsed.acoes || parsed.sugestoes || []
     } catch {
-      // silent fail
+      // silent
     }
 
     let criadas = 0
     if (acoesGeradas.length > 0) {
       const finalAcoes = acoesGeradas.slice(0, maxSugestoes).map((a) => ({
-        titulo_acao: a.titulo_acao || 'Ação sugerida',
+        titulo_acao: a.titulo_acao || 'Acao sugerida',
         plano_detalhado: a.plano_detalhado || '',
         prioridade: a.prioridade || 'IMPORTANTE',
         categoria: a.categoria || 'Geral',
         status: 'SUGERIDA',
         restaurante_id: targetRestauranteId || null,
-        texto: 'Gerado automaticamente via IA baseando-se em Insights ativos.',
+        texto: 'Gerado automaticamente via IA baseando-se em insights ativos, no perfil do restaurante e nas boas praticas.',
       }))
 
-      let { error: insertErr } = await supabaseAdmin.from('acoes_operacionais').insert(finalAcoes)
-      if (insertErr?.code === '42703') {
-        // restaurante_id column doesn't exist yet — retry without it
-        const acoesNoRest = finalAcoes.map(({ restaurante_id: _r, ...rest }) => rest)
-        const retry = await supabaseAdmin.from('acoes_operacionais').insert(acoesNoRest)
-        insertErr = retry.error
-      }
+      const { error: insertErr } = await db.from('acoes_operacionais').insert(finalAcoes)
       if (insertErr) throw insertErr
       criadas = finalAcoes.length
     }
@@ -227,9 +216,8 @@ ${JSON.stringify(
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   } catch (err: any) {
-    const errMsg =
-      err?.message || err?.details || err?.hint || JSON.stringify(err) || 'unknown error'
-    return new Response(JSON.stringify({ error: errMsg, code: err?.code, raw: String(err) }), {
+    const errMsg = err?.message || err?.details || err?.hint || JSON.stringify(err) || 'unknown error'
+    return new Response(JSON.stringify({ error: errMsg, code: err?.code }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
