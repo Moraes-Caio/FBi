@@ -1,13 +1,18 @@
 import { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-const CLASSE_LINK =
-  'text-[#1D4ED8] font-medium underline break-all hover:text-blue-800 transition-colors'
+/** Link em fundo claro (respostas da IA). */
+const LINK_CLARO =
+  'text-[#1D4ED8] font-medium underline underline-offset-2 break-all hover:text-blue-800 transition-colors'
+/** Link em fundo escuro (bolha azul do usuário) — precisa de contraste alto. */
+export const LINK_ESCURO =
+  'text-white font-semibold underline underline-offset-2 decoration-white/70 break-all hover:decoration-white transition-colors'
 
 /** URL solta no texto (sem markdown), com ou sem http:// na frente. */
 const URL_SOLTA = /((?:https?:\/\/|www\.)[^\s<>()[\]{}"']+[^\s<>()[\]{}"'.,;:!?])/gi
 
-export function parseInline(text: string): ReactNode[] {
+export function parseInline(text: string, classeLink: string = LINK_CLARO): ReactNode[] {
+  const CLASSE_LINK = classeLink
   const parts = text.split(/(\*\*.*?\*\*|\[.*?\]\(.*?\))/g)
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**')) {

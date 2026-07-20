@@ -38,7 +38,7 @@ import { Label } from '@/components/ui/label'
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { FormattedMessage, parseInline } from '@/lib/chat-utils'
+import { FormattedMessage, parseInline, LINK_ESCURO } from '@/lib/chat-utils'
 import { useChat } from '@/hooks/use-chat'
 import { buscarMemoria, FatoMemoria } from '@/lib/queries/memoria-assistente'
 import { buscarKpis } from '@/lib/queries/visao-geral'
@@ -713,7 +713,7 @@ export function ChatFab() {
                           )}
                           {msg.role === 'user' ? (
                             <span className="whitespace-pre-wrap">
-                              {parseInline(msg.content as string)}
+                              {parseInline(msg.content as string, LINK_ESCURO)}
                             </span>
                           ) : (
                             <FormattedMessage content={msg.content as string} />

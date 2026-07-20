@@ -13,7 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { InsightData } from '@/lib/mock-data'
 import { cn } from '@/lib/utils'
-import { FormattedMessage, parseInline } from '@/lib/chat-utils'
+import { FormattedMessage, parseInline, LINK_ESCURO } from '@/lib/chat-utils'
 import { useChat } from '@/hooks/use-chat'
 import { supabase } from '@/lib/supabase/client'
 import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
@@ -238,7 +238,7 @@ export function AiChatSheet({ open, onOpenChange, insight }: AiChatSheetProps) {
                           : 'bg-[#F9FAFB] text-[#1F2937] border border-gray-100 rounded-tl-none',
                       )}
                     >
-                      {msg.role === 'user' ? parseInline(msg.text) : <FormattedMessage content={msg.text} />}
+                      {msg.role === 'user' ? parseInline(msg.text, LINK_ESCURO) : <FormattedMessage content={msg.text} />}
                     </div>
                   </div>
                   {msg.role === 'assistant' && msg.intent === 'criar_acao' && (

@@ -27,6 +27,9 @@ export default defineConfig(({ mode }) => ({
   plugins: [mode === 'development' ? uidPlugin() : undefined, react()].filter(Boolean),
   define: {
     'process.env.NODE_ENV': JSON.stringify(mode ?? process.env.NODE_ENV ?? 'production'),
+    // Marca quando este bundle foi gerado, para saber se o navegador está
+    // rodando código atual ou um servidor de desenvolvimento antigo.
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
   resolve: {
     alias: [
