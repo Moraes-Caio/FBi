@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/use-auth'
 export interface MascoteConfig {
   nome: string
   personalidade: string
+  fotoUrl: string | null
 }
 
 export interface RestauranteConfig {
@@ -19,6 +20,7 @@ export interface RestauranteConfig {
 const MASCOTE_PADRAO: MascoteConfig = {
   nome: 'Chef Pepê',
   personalidade: 'direto_objetivo',
+  fotoUrl: null,
 }
 
 const RestauranteConfigContext = createContext<RestauranteConfig | undefined>(undefined)
@@ -67,6 +69,7 @@ export const RestauranteConfigProvider = ({ children }: { children: ReactNode })
         setMascote({
           nome: mc.nome || MASCOTE_PADRAO.nome,
           personalidade: mc.personalidade || MASCOTE_PADRAO.personalidade,
+          fotoUrl: mc.foto_url || null,
         })
         setConfigInsights((data.config_insights as any) || {})
       }

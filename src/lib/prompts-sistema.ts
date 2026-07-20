@@ -2,9 +2,8 @@ import { getPersonalidadePrompt } from './mascote-config'
 
 export function construirSystemPromptChef(mascoteConfig: any, contextoDados?: any) {
   const nome = mascoteConfig?.nome || 'Chef Pepê'
-  const personalidade = getPersonalidadePrompt(
-    mascoteConfig?.personalidade || 'profissional_amigavel',
-  )
+  // 'profissional_amigavel' não existe no mapa de personalidades — o padrão real é 'direto_objetivo'
+  const personalidade = getPersonalidadePrompt(mascoteConfig?.personalidade || 'direto_objetivo')
 
   let prompt = `Você é o ${nome}, um assistente virtual especialista em gestão e operação de restaurantes.\nSua personalidade: ${personalidade}\n\nResponda sempre em Markdown. Seja objetivo.`
 

@@ -1,19 +1,105 @@
 import { useEffect, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { RestaurantTab } from './settings/RestaurantTab'
-import { MascotTab } from './settings/MascotTab'
-import { CategoriesTab } from './settings/CategoriesTab'
-import { WaitersTab } from './settings/WaitersTab'
+import { RestaurantTab, RestauranteForm } from './settings/RestaurantTab'
+import { MascotTab, MascoteForm } from './settings/MascotTab'
 import { WhatsAppTab } from './settings/WhatsAppTab'
 import { useUserProfile } from '@/hooks/use-user-profile'
+import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
+import { useToast } from '@/hooks/use-toast'
+import { supabase } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
+
+const RESTAURANTE_VAZIO: RestauranteForm = { nome_restaurante: '', detalhes: '', logo_url: '' }
+const MASCOTE_VAZIO: MascoteForm = { nome: '', personalidade: 'direto_objetivo', foto_url: '' }
 
 export default function Settings() {
   const { profile, loading } = useUserProfile()
+  const { refetch: refetchConfig } = useRestauranteConfig()
+  const { toast } = useToast()
   const [activeSection, setActiveSection] = useState('restaurante')
   const isManualScroll = useRef(false)
+
+  const [carregandoDados, setCarregandoDados] = useState(true)
+  const [restaurante, setRestaurante] = useState<RestauranteForm>(RESTAURANTE_VAZIO)
+  const [mascote, setMascote] = useState<MascoteForm>(MASCOTE_VAZIO)
+  const [salvo, setSalvo] = useState({ restaurante: RESTAURANTE_VAZIO, mascote: MASCOTE_VAZIO })
+  // Guarda o mascote_config original para não apagar campos que não estão no
+  // formulário (ex: "focos", gravado no onboarding e usado no contexto da IA)
+  const mascoteBruto = useRef<Record<string, unknown>>({})
+  const [salvando, setSalvando] = useState(false)
+  const [enviandoArquivo, setEnviandoArquivo] = useState(false)
+
+  const restauranteId = profile?.restaurante_id ?? null
+
+  // Carrega tudo de uma vez — as abas viraram formulários controlados
+  useEffect(() => {
+    if (loading) return
+    if (!restauranteId) {
+      setCarregandoDados(false)
+      return
+    }
+    const carregar = async () => {
+      const { data } = await supabase
+        .from('restaurantes')
+        .select('nome_restaurante, detalhes, logo_url, mascote_config')
+        .eq('id', restauranteId)
+        .single()
+
+      if (data) {
+        const cfg = (data.mascote_config as any) || {}
+        mascoteBruto.current = cfg
+        const r: RestauranteForm = {
+          nome_restaurante: data.nome_restaurante || '',
+          detalhes: (data as any).detalhes || '',
+          logo_url: (data as any).logo_url || '',
+        }
+        const m: MascoteForm = {
+          nome: cfg.nome || '',
+          personalidade: cfg.personalidade || 'direto_objetivo',
+          foto_url: cfg.foto_url || '',
+        }
+        setRestaurante(r)
+        setMascote(m)
+        setSalvo({ restaurante: r, mascote: m })
+      }
+      setCarregandoDados(false)
+    }
+    carregar()
+  }, [loading, restauranteId])
+
+  const alterado =
+    JSON.stringify({ restaurante, mascote }) !== JSON.stringify(salvo)
+
+  const handleSalvar = async () => {
+    if (!restauranteId) return
+    setSalvando(true)
+    const { error } = await supabase
+      .from('restaurantes')
+      .update({
+        nome_restaurante: restaurante.nome_restaurante,
+        detalhes: restaurante.detalhes,
+        logo_url: restaurante.logo_url || null,
+        mascote_config: { ...mascoteBruto.current, ...mascote },
+      } as any)
+      .eq('id', restauranteId)
+    setSalvando(false)
+
+    if (error) {
+      toast({ title: 'Erro', description: 'Não foi possível salvar.', variant: 'destructive' })
+      return
+    }
+    setSalvo({ restaurante, mascote })
+    refetchConfig() // atualiza sidebar, banner e o assistente do chat na hora
+    toast({ title: 'Salvo', description: 'Configurações atualizadas.' })
+  }
+
+  const handleDescartar = () => {
+    setRestaurante(salvo.restaurante)
+    setMascote(salvo.mascote)
+  }
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -27,19 +113,16 @@ export default function Settings() {
       },
       { rootMargin: '-20% 0px -40% 0px', threshold: [0.2, 0.5, 0.8] },
     )
-
     const sections = document.querySelectorAll('section[id]')
     sections.forEach((s) => observer.observe(s))
-
     return () => observer.disconnect()
-  }, [loading])
+  }, [loading, carregandoDados])
 
   const scrollTo = (id: string) => {
     isManualScroll.current = true
     setActiveSection(id)
     const element = document.getElementById(id)
     if (element) {
-      // Precise offset for the sticky header
       const y = element.getBoundingClientRect().top + window.scrollY - 100
       window.scrollTo({ top: y, behavior: 'smooth' })
       setTimeout(() => {
@@ -48,7 +131,7 @@ export default function Settings() {
     }
   }
 
-  if (loading) {
+  if (loading || carregandoDados) {
     return (
       <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-white px-6 shadow-sm">
@@ -74,8 +157,6 @@ export default function Settings() {
     { id: 'restaurante', label: 'Restaurante' },
     { id: 'whatsapp', label: 'WhatsApp' },
     { id: 'mascote', label: 'Assistente de IA' },
-    { id: 'categorias', label: 'Categorias de Feedback' },
-    { id: 'garcons', label: 'Garçons' },
   ]
 
   return (
@@ -95,7 +176,7 @@ export default function Settings() {
           <div>
             <h2 className="text-2xl font-bold tracking-tight text-gray-900">Configurações</h2>
             <p className="text-muted-foreground mt-1.5 text-sm">
-              Gerencie o perfil do seu restaurante, mascote, integrações e permissões da equipe.
+              Gerencie o perfil do seu restaurante, a conexão do WhatsApp e o assistente de IA.
             </p>
           </div>
 
@@ -117,26 +198,55 @@ export default function Settings() {
               ))}
             </nav>
 
-            <div className="flex-1 space-y-16 pb-32 w-full min-w-0">
+            <div className="flex-1 space-y-16 pb-40 w-full min-w-0">
               <section id="restaurante" className="scroll-mt-28">
-                <RestaurantTab restauranteId={profile.restaurante_id} />
+                <RestaurantTab
+                  restauranteId={restauranteId}
+                  value={restaurante}
+                  onChange={setRestaurante}
+                  onUploadingChange={setEnviandoArquivo}
+                />
               </section>
               <section id="whatsapp" className="scroll-mt-28">
-                <WhatsAppTab restauranteId={profile.restaurante_id} />
+                <WhatsAppTab restauranteId={restauranteId} />
               </section>
               <section id="mascote" className="scroll-mt-28">
-                <MascotTab restauranteId={profile.restaurante_id} />
-              </section>
-              <section id="categorias" className="scroll-mt-28">
-                <CategoriesTab restauranteId={profile.restaurante_id} />
-              </section>
-              <section id="garcons" className="scroll-mt-28">
-                <WaitersTab restauranteId={profile.restaurante_id} />
+                <MascotTab
+                  restauranteId={restauranteId}
+                  value={mascote}
+                  onChange={setMascote}
+                  onUploadingChange={setEnviandoArquivo}
+                />
               </section>
             </div>
           </div>
         </div>
       </main>
+
+      {/* Barra única de salvar — aparece quando há alterações pendentes */}
+      {alterado && (
+        <div className="sticky bottom-0 z-30 border-t bg-white/95 backdrop-blur shadow-[0_-4px_16px_-8px_rgba(0,0,0,0.15)]">
+          <div className="max-w-6xl mx-auto flex items-center justify-between gap-4 px-6 md:px-10 py-4">
+            <p className="text-sm text-muted-foreground">Você tem alterações não salvas.</p>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" onClick={handleDescartar} disabled={salvando}>
+                Descartar
+              </Button>
+              <Button onClick={handleSalvar} disabled={salvando || enviandoArquivo} className="min-w-[160px]">
+                {salvando ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Salvando...
+                  </>
+                ) : enviandoArquivo ? (
+                  'Aguarde o upload...'
+                ) : (
+                  'Salvar alterações'
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -10,7 +10,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { InsightData } from '@/lib/mock-data'
 import { cn } from '@/lib/utils'
 import { FormattedMessage } from '@/lib/chat-utils'
@@ -193,6 +193,7 @@ export function AiChatSheet({ open, onOpenChange, insight }: AiChatSheetProps) {
         <SheetHeader className="p-4 border-b bg-white text-foreground">
           <SheetTitle className="flex items-center gap-3 text-lg font-semibold">
             <Avatar className="h-10 w-10 border border-gray-100 shadow-sm">
+              {mascote.fotoUrl && <AvatarImage src={mascote.fotoUrl} alt={mascoteNome} className="object-cover" />}
               <AvatarFallback className="bg-primary/10 text-primary font-bold">
                 {getIniciais(mascoteNome, 1)}
               </AvatarFallback>

@@ -23,7 +23,7 @@ import {
   SheetTrigger,
   SheetDescription,
 } from '@/components/ui/sheet'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   Dialog,
   DialogContent,
@@ -440,6 +440,7 @@ export function ChatFab() {
               ) : (
                 <>
                   <Avatar className="h-10 w-10 border border-gray-100 shadow-sm shrink-0">
+                    {mascote.fotoUrl && <AvatarImage src={mascote.fotoUrl} alt={mascoteNome} className="object-cover" />}
                     <AvatarFallback className="bg-primary/10 text-primary font-bold">
                       {getIniciais(mascoteNome, 1)}
                     </AvatarFallback>

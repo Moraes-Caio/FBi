@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
-import { Button } from '@/components/ui/button'
+import { useState, useRef } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -15,99 +14,79 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  CardFooter,
 } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/hooks/use-toast'
 import { supabase } from '@/lib/supabase/client'
-import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
 import { ASSISTANT_PERSONALITIES } from '@/lib/mascote-config'
-import { Bot, Upload, X } from 'lucide-react'
+import { Bot, X, Loader2, Camera } from 'lucide-react'
 
-export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
+export interface MascoteForm {
+  nome: string
+  personalidade: string
+  foto_url: string
+}
+
+export function MascotTab({
+  restauranteId,
+  value,
+  onChange,
+  onUploadingChange,
+}: {
+  restauranteId: number | null
+  value: MascoteForm
+  onChange: (v: MascoteForm) => void
+  onUploadingChange?: (v: boolean) => void
+}) {
   const { toast } = useToast()
-  const { refetch: refetchConfig } = useRestauranteConfig()
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [uploadingFoto, setUploadingFoto] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  // Preview local: mostra a imagem escolhida na hora, sem esperar o upload/CDN
+  const [preview, setPreview] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [assistente, setAssistente] = useState({
-    nome: '',
-    personalidade: 'direto_objetivo',
-    foto_url: '',
-  })
-
-  useEffect(() => {
-    if (!restauranteId) {
-      setLoading(false)
-      return
-    }
-    const fetchData = async () => {
-      const { data } = await supabase
-        .from('restaurantes')
-        .select('mascote_config')
-        .eq('id', restauranteId)
-        .single()
-
-      if (data?.mascote_config) {
-        const cfg = data.mascote_config as any
-        setAssistente({
-          nome: cfg.nome || '',
-          personalidade: cfg.personalidade || 'direto_objetivo',
-          foto_url: cfg.foto_url || '',
-        })
-      }
-      setLoading(false)
-    }
-    fetchData()
-  }, [restauranteId])
+  const fotoMostrada = preview || value.foto_url
 
   const handleUploadFoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files || event.target.files.length === 0 || !restauranteId) return
-    const file = event.target.files[0]
-    const fileExt = file.name.split('.').pop()
-    const filePath = `assistente-${restauranteId}-${Date.now()}.${fileExt}`
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !restauranteId) return
 
-    setUploadingFoto(true)
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, file, { upsert: true })
+    const objetoUrl = URL.createObjectURL(file)
+    setPreview(objetoUrl) // aparece imediatamente
+    setEnviando(true)
+    onUploadingChange?.(true)
 
-    if (uploadError) {
-      toast({ title: 'Erro no upload', description: uploadError.message, variant: 'destructive' })
-      setUploadingFoto(false)
-      return
-    }
+    try {
+      const ext = file.name.split('.').pop()
+      const caminho = `assistente-${restauranteId}-${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('avatars').upload(caminho, file, { upsert: true })
+      if (error) throw error
 
-    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath)
-    setAssistente((prev) => ({ ...prev, foto_url: publicUrl }))
-    setUploadingFoto(false)
-    toast({ title: 'Foto enviada', description: 'Salve as alterações para confirmar.' })
-  }
+      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(caminho)
+      onChange({ ...value, foto_url: publicUrl })
 
-  const handleRemoveFoto = () => {
-    setAssistente((prev) => ({ ...prev, foto_url: '' }))
-  }
-
-  const handleSave = async () => {
-    if (!restauranteId) return
-    setSaving(true)
-    const { error } = await supabase
-      .from('restaurantes')
-      .update({ mascote_config: assistente } as any)
-      .eq('id', restauranteId)
-
-    setSaving(false)
-    if (error) {
-      toast({ title: 'Erro', description: 'Não foi possível salvar.', variant: 'destructive' })
-    } else {
-      refetchConfig()
-      toast({ title: 'Sucesso', description: 'Configurações do assistente atualizadas.' })
+      // só troca o preview pela URL real depois que ela estiver carregada (sem piscar)
+      const img = new Image()
+      img.onload = () => {
+        setPreview(null)
+        URL.revokeObjectURL(objetoUrl)
+      }
+      img.onerror = () => setPreview(null)
+      img.src = publicUrl
+    } catch (err: any) {
+      setPreview(null)
+      URL.revokeObjectURL(objetoUrl)
+      toast({ title: 'Erro no upload', description: err.message, variant: 'destructive' })
+    } finally {
+      setEnviando(false)
+      onUploadingChange?.(false)
     }
   }
 
-  if (loading) return <Skeleton className="h-96 w-full animate-fade-in" />
+  const handleRemoveFoto = (e: React.MouseEvent) => {
+    e.stopPropagation() // não abrir o seletor de arquivo
+    setPreview(null)
+    onChange({ ...value, foto_url: '' })
+  }
 
   return (
     <Card className="shadow-subtle animate-fade-in-up">
@@ -115,63 +94,59 @@ export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
         <CardTitle>Assistente de IA</CardTitle>
         <CardDescription>
           Configure a identidade e personalidade do assistente virtual que analisa os feedbacks do
-          seu restaurante.
+          seu restaurante. O nome, a foto e a personalidade aparecem no chat.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">
         <div className="flex flex-col sm:flex-row gap-8 items-start">
           <div className="space-y-3 shrink-0">
             <Label>Foto do Assistente</Label>
-            <div className="relative w-28 h-28">
-              <div
-                className="w-28 h-28 rounded-full border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden cursor-pointer hover:border-primary/50 hover:bg-gray-100 transition-all group"
-                onClick={() => !uploadingFoto && fileInputRef.current?.click()}
-              >
-                {assistente.foto_url ? (
-                  <img
-                    src={assistente.foto_url}
-                    alt="Foto do assistente"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center gap-1 text-gray-400 group-hover:text-primary transition-colors">
-                    <Bot className="w-8 h-8" />
-                    <span className="text-[10px] font-medium">Adicionar foto</span>
-                  </div>
-                )}
-                {uploadingFoto && (
-                  <div className="absolute inset-0 bg-white/80 flex items-center justify-center rounded-full">
-                    <span className="text-xs text-primary animate-pulse">Enviando...</span>
-                  </div>
-                )}
-              </div>
-              {assistente.foto_url && (
-                <button
-                  onClick={handleRemoveFoto}
-                  className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-              <input
-                type="file"
-                ref={fileInputRef}
-                className="hidden"
-                accept="image/png, image/jpeg, image/gif, image/webp"
-                onChange={handleUploadFoto}
-                disabled={uploadingFoto}
-              />
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-28 text-xs"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploadingFoto}
+            <div
+              className="group relative w-28 h-28 rounded-full overflow-hidden border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center cursor-pointer hover:border-primary/50 transition-all"
+              onClick={() => !enviando && fileInputRef.current?.click()}
             >
-              <Upload className="w-3.5 h-3.5 mr-1.5" />
-              {uploadingFoto ? 'Enviando...' : 'Fazer upload'}
-            </Button>
+              {fotoMostrada ? (
+                <img src={fotoMostrada} alt="Foto do assistente" className="w-full h-full object-cover" />
+              ) : (
+                <div className="flex flex-col items-center gap-1 text-gray-400 group-hover:text-primary transition-colors">
+                  <Bot className="w-8 h-8" />
+                  <span className="text-[10px] font-medium">Adicionar foto</span>
+                </div>
+              )}
+
+              {/* Hover: escurece a foto e mostra as ações sobre ela */}
+              {fotoMostrada && !enviando && (
+                <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+                  <Camera className="w-5 h-5 text-white" />
+                  <span className="text-[10px] text-white font-medium">Trocar</span>
+                  <button
+                    type="button"
+                    onClick={handleRemoveFoto}
+                    title="Remover foto"
+                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-white/95 text-red-600 flex items-center justify-center hover:bg-white hover:scale-105 transition"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {enviando && (
+                <div className="absolute inset-0 bg-black/45 flex items-center justify-center">
+                  <Loader2 className="w-6 h-6 text-white animate-spin" />
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground w-28 leading-snug">
+              Clique para trocar. Passe o mouse para remover.
+            </p>
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept="image/png, image/jpeg, image/gif, image/webp"
+              onChange={handleUploadFoto}
+              disabled={enviando}
+            />
           </div>
 
           <div className="flex-1 space-y-5 w-full">
@@ -179,8 +154,8 @@ export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
               <Label htmlFor="assistente-nome">Nome do Assistente</Label>
               <Input
                 id="assistente-nome"
-                value={assistente.nome}
-                onChange={(e) => setAssistente({ ...assistente, nome: e.target.value })}
+                value={value.nome}
+                onChange={(e) => onChange({ ...value, nome: e.target.value })}
                 placeholder="Ex: Ana, Max, Aria..."
                 className="max-w-sm"
               />
@@ -188,8 +163,8 @@ export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
             <div className="space-y-2">
               <Label htmlFor="assistente-personalidade">Personalidade</Label>
               <Select
-                value={assistente.personalidade}
-                onValueChange={(v) => setAssistente({ ...assistente, personalidade: v })}
+                value={value.personalidade}
+                onValueChange={(v) => onChange({ ...value, personalidade: v })}
               >
                 <SelectTrigger id="assistente-personalidade" className="max-w-sm">
                   <SelectValue placeholder="Selecione..." />
@@ -203,24 +178,19 @@ export function MascotTab({ restauranteId }: { restauranteId: number | null }) {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground mt-1">
-                {assistente.personalidade === 'direto_objetivo' &&
+                {value.personalidade === 'direto_objetivo' &&
                   'Respostas curtas e focadas no que o gestor precisa agir imediatamente.'}
-                {assistente.personalidade === 'detalhado_analitico' &&
+                {value.personalidade === 'detalhado_analitico' &&
                   'Análises aprofundadas com padrões, tendências e correlações dos dados.'}
-                {assistente.personalidade === 'motivador_positivo' &&
+                {value.personalidade === 'motivador_positivo' &&
                   'Apresenta dados de forma construtiva, destacando oportunidades de melhoria.'}
-                {assistente.personalidade === 'formal_profissional' &&
+                {value.personalidade === 'formal_profissional' &&
                   'Linguagem técnica e estruturada para comunicações executivas.'}
               </p>
             </div>
           </div>
         </div>
       </CardContent>
-      <CardFooter className="border-t bg-muted/20 px-6 py-4">
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? 'Salvando...' : 'Salvar Alterações'}
-        </Button>
-      </CardFooter>
     </Card>
   )
 }
