@@ -181,9 +181,21 @@ Não altere fatos, números nem instruções técnicas. Se não responderem, ign
 
   if (ctx.memoria?.length) {
     prompt += bloco(
-      'O que você já aprendeu em conversas anteriores',
+      'O que você anotou em conversas anteriores',
       ctx.memoria.map((m: any) => `- ${m.fato}`).join('\n') +
-        '\nUse esses fatos naturalmente. Se algum estiver desatualizado, prefira o dado atual.',
+        `
+
+Estas são ANOTAÇÕES suas, feitas a partir de conversas — não são a configuração oficial.
+A configuração oficial é a do bloco "Perfil do restaurante", preenchida pelo dono.
+
+QUANDO OS DOIS SE CONTRADIZEM:
+- Se o dono PERGUNTA sobre esse dado: mostre as duas versões e pergunte qual é a
+  verdadeira. Ex: "Na configuração está 20 mesas, mas numa conversa você me disse 28.
+  Qual está certo?". Não escolha sozinho.
+- Se o dono INFORMA um dado novo que contraria a configuração: aceite o que ele acabou
+  de dizer e peça, numa frase, que ele atualize em Configurações → Sobre o restaurante,
+  para o resto do sistema (relatórios e insights) usar o valor certo.
+- Nunca apague nem finja que a divergência não existe.`,
     )
   }
 

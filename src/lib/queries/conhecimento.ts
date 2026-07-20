@@ -138,7 +138,11 @@ export async function indexarDocumento(
     let gravados = 0
     for (let i = 0; i < trechos.length; i += LOTE_EMBED) {
       const lote = trechos.slice(i, i + LOTE_EMBED)
-      const { embeddings } = await chamarConhecimento({ acao: 'embed', textos: lote })
+      // prefixa o título: dá âncora temática ao trecho e melhora a recuperação
+      const { embeddings } = await chamarConhecimento({
+        acao: 'embed',
+        textos: lote.map((c) => `${entrada.titulo}. ${c}`),
+      })
 
       const linhas = lote.map((conteudo, idx) => ({
         documento_id: doc.id,
@@ -185,6 +189,7 @@ export async function buscarConhecimento(
     const { embedding } = await chamarConhecimento({ acao: 'embed_consulta', consulta })
     const { data, error } = await supabase.rpc('buscar_conhecimento', {
       consulta_embedding: embedding,
+      consulta_texto: consulta,
       limite,
     })
     if (error) throw error

@@ -219,7 +219,26 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
             fontes = comWeb.fontes
           }
         } catch (err: any) {
-          respostaTexto = `Não consegui consultar essa informação agora (${err.message}). Pode tentar de novo ou me dizer o que encontrou?`
+          // Consulta externa falhou: em vez de mostrar erro técnico, responde
+          // com o que sabe, avisando que não conseguiu acessar a internet.
+          console.warn('Consulta externa falhou:', err)
+          try {
+            respostaTexto = (
+              await enviarMensagemComFontes([
+                { role: 'system', content: sysPrompt },
+                ...apiMessages.slice(1),
+                {
+                  role: 'system',
+                  content:
+                    'A consulta à internet falhou. Responda com o que você já sabe, avisando numa frase curta que não conseguiu acessar a internet agora e que a informação pode estar desatualizada. Não mencione erros técnicos.',
+                },
+              ])
+            ).texto
+          } catch {
+            respostaTexto =
+              'Não consegui acessar a internet agora para confirmar isso. Tente de novo em instantes.'
+          }
+          fontes = []
         } finally {
           setBuscandoWeb(false)
         }
