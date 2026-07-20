@@ -176,30 +176,41 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
           )
           const historico = apiMessages.slice(1)
 
+          let termosBusca = pedeBusca
+            ? bruto.slice(MARCADOR_BUSCA.length).replace(/^[:\s]+/, '').trim()
+            : ''
+          let leituraOk = false
+
           if (pedeLeitura) {
-            // Lê a página pedida e devolve o conteúdo para a IA responder
             const url = bruto.slice(MARCADOR_LEITURA.length).replace(/^[:\s]+/, '').trim()
             const pagina = await lerPagina(url)
-            respostaTexto = (
-              await enviarMensagemComFontes([
-                { role: 'system', content: promptComBusca },
-                ...historico,
-                {
-                  role: 'system',
-                  content: `Conteúdo da página ${url} (${pagina.titulo}):\n\n${pagina.texto.slice(0, 12000)}`,
-                },
-              ])
-            ).texto
-            fontes = [{ url, titulo: pagina.titulo }]
-          } else {
-            // Pesquisa com os termos que a própria IA escolheu
-            const termos = bruto.slice(MARCADOR_BUSCA.length).replace(/^[:\s]+/, '').trim()
+
+            if (pagina.ok) {
+              respostaTexto = (
+                await enviarMensagemComFontes([
+                  { role: 'system', content: promptComBusca },
+                  ...historico,
+                  {
+                    role: 'system',
+                    content: `Conteúdo da página ${url} (${pagina.titulo}):\n\n${pagina.texto!.slice(0, 12000)}`,
+                  },
+                ])
+              ).texto
+              fontes = [{ url, titulo: pagina.titulo || url }]
+              leituraOk = true
+            } else {
+              // Página bloqueada ou feita em JS: em vez de falhar, pesquisa na web
+              termosBusca = url.replace(/^https?:\/\//, '').replace(/\/$/, '')
+            }
+          }
+
+          if (!leituraOk) {
             const comWeb = await enviarMensagemComFontes(
               [
                 { role: 'system', content: promptComBusca },
                 ...historico,
-                ...(termos
-                  ? [{ role: 'system' as const, content: `Pesquise por: ${termos}` }]
+                ...(termosBusca
+                  ? [{ role: 'system' as const, content: `Pesquise por: ${termosBusca}` }]
                   : []),
               ],
               { web: true },
@@ -214,8 +225,11 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
         }
       }
 
-      // Mostra a resposta assim que chega; a intenção é detectada depois
+      // Mostra a resposta assim que chega e JÁ desliga o "digitando":
+      // o que vem depois (gravar histórico, memória, intenção) é trabalho de
+      // bastidor e não deve deixar o indicador aceso.
       aplicar((prev) => [...prev, { role: 'assistant', text: respostaTexto, fontes }])
+      setLoading(false) // enviandoRef segue travado até gravar, para nada sobrescrever
 
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {

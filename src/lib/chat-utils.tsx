@@ -1,6 +1,12 @@
 import { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
+const CLASSE_LINK =
+  'text-[#1D4ED8] font-medium underline break-all hover:text-blue-800 transition-colors'
+
+/** URL solta no texto (sem markdown), com ou sem http:// na frente. */
+const URL_SOLTA = /((?:https?:\/\/|www\.)[^\s<>()[\]{}"']+[^\s<>()[\]{}"'.,;:!?])/gi
+
 export function parseInline(text: string): ReactNode[] {
   const parts = text.split(/(\*\*.*?\*\*|\[.*?\]\(.*?\))/g)
   return parts.map((part, i) => {
@@ -27,18 +33,33 @@ export function parseInline(text: string): ReactNode[] {
         )
       }
       return (
-        <a
-          key={i}
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[#1D4ED8] font-medium underline hover:text-blue-800 transition-colors"
-        >
+        <a key={i} href={url} target="_blank" rel="noopener noreferrer" className={CLASSE_LINK}>
           {label}
         </a>
       )
     }
-    return <span key={i}>{part}</span>
+
+    // Texto comum: transforma URLs soltas em links clicáveis
+    const pedacos = part.split(URL_SOLTA)
+    if (pedacos.length === 1) return <span key={i}>{part}</span>
+    return (
+      <span key={i}>
+        {pedacos.map((p, j) => {
+          if (!p) return null
+          if (!URL_SOLTA.test(p)) {
+            URL_SOLTA.lastIndex = 0
+            return <span key={j}>{p}</span>
+          }
+          URL_SOLTA.lastIndex = 0
+          const href = p.startsWith('http') ? p : `https://${p}`
+          return (
+            <a key={j} href={href} target="_blank" rel="noopener noreferrer" className={CLASSE_LINK}>
+              {p}
+            </a>
+          )
+        })}
+      </span>
+    )
   })
 }
 

@@ -23,10 +23,25 @@ Como ler os números:
 - Comparações com o período anterior só valem quando há base suficiente; com poucas avaliações
   a variação percentual engana.`
 
-const REGRAS_RESPOSTA = `REGRAS:
+const REGRAS_RESPOSTA = `COMO USAR O CONTEXTO (importante):
+Tudo o que vem abaixo são DADOS que você consulta — não são falas suas.
+Boa parte foi escrita pelo próprio dono, em primeira pessoa ("meu avô", "abri em 2019",
+"meu maior problema é..."). Esse "eu" é o DONO, nunca você.
+
+- NUNCA copie e cole um trecho do contexto como se fosse sua resposta.
+- NUNCA fale em primeira pessoa sobre a vida do dono. Errado: "Meu avô fundou o
+  restaurante". Certo: "Pelo que você me contou, seu avô fundou o restaurante para
+  alimentar os americanos na Segunda Guerra."
+- Sempre PROCESSE a informação: interprete, reorganize, resuma, conecte com os números
+  e responda exatamente o que foi perguntado — em vez de devolver o texto cru.
+- Você pode reescrever e reordenar livremente, mas NÃO pode inventar nem distorcer
+  fatos, números, datas ou nomes.
+- Quando a informação vier de um material de treinamento, diga de qual material saiu.
+- Se a resposta não estiver no contexto, diga que ainda não tem essa informação
+  (ou consulte a internet, se a regra abaixo permitir).
+
+REGRAS DE ESTILO:
 - Responda em português do Brasil, em Markdown, de forma objetiva.
-- Use SOMENTE os dados fornecidos abaixo. Nunca invente números, avaliações ou nomes.
-- Se o dado não estiver no contexto, diga que ainda não tem essa informação e sugira onde ela apareceria.
 - Fale como quem conhece o restaurante: cite categorias, garçons e trechos reais das avaliações.
 - Evite jargão técnico (não use "CSAT", "NPS", "score", "dataset").
 - Ao recomendar algo, seja concreto e executável nesta semana.
@@ -113,7 +128,9 @@ ${REGRAS_RESPOSTA}`
         p.diferenciais ? `Diferenciais: ${p.diferenciais}` : '',
         p.desafios ? `Desafios atuais relatados pelo dono: ${p.desafios}` : '',
         p.ano_abertura ? `Aberto desde: ${p.ano_abertura}` : '',
-        r.detalhes ? `\nO dono descreve o restaurante assim:\n${r.detalhes}` : '',
+        r.detalhes
+          ? `\nTexto escrito PELO DONO sobre o restaurante (o "eu" abaixo é ele, não você — nunca repita isto literalmente, use como informação):\n"""\n${r.detalhes}\n"""`
+          : '',
         Array.isArray(mascoteConfig?.focos) && mascoteConfig.focos.length
           ? `\nO dono pediu atenção especial a: ${mascoteConfig.focos.join(', ')}.`
           : '',
@@ -135,7 +152,11 @@ ${REGRAS_RESPOSTA}`
             `[${i + 1}] (${t.titulo}${t.escopo === 'global' ? ', material de referência' : ''})\n"${t.conteudo}"`,
         )
         .join('\n\n') +
-        '\n\nEstes trechos vieram dos documentos que o dono cadastrou. Quando responder com base neles, diga de qual material saiu. Se não responderem a pergunta, ignore-os.',
+        `\n\nEstes trechos foram recuperados por busca semântica nos materiais cadastrados —
+vieram soltos, fora de ordem e sem o resto do documento. NÃO os transcreva.
+Leia, entenda, pegue só as partes que respondem à pergunta, reorganize na ordem que
+fizer sentido e escreva uma resposta própria, citando de qual material saiu.
+Não altere fatos, números nem instruções técnicas. Se não responderem, ignore-os.`,
     )
   }
 

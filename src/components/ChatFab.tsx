@@ -13,6 +13,7 @@ import {
   ImageIcon,
   X,
   Globe,
+  ChevronDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -93,6 +94,42 @@ interface SessaoItem {
   date: Date
   pinned: boolean
   nome?: string
+}
+
+/** Botão que revela as fontes usadas na pesquisa. */
+function Fontes({ fontes }: { fontes: { url: string; titulo: string }[] }) {
+  const [aberto, setAberto] = useState(false)
+  const dominio = (u: string) => {
+    try { return new URL(u).hostname.replace(/^www\./, '') } catch { return u }
+  }
+  return (
+    <div className="mt-2 pt-2 border-t border-gray-200/70">
+      <button
+        onClick={() => setAberto((v) => !v)}
+        className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
+      >
+        <Globe className="h-3 w-3" />
+        {fontes.length} {fontes.length === 1 ? 'fonte' : 'fontes'}
+        <ChevronDown className={cn('h-3 w-3 transition-transform', aberto && 'rotate-180')} />
+      </button>
+      {aberto && (
+        <div className="mt-1.5 flex flex-col gap-1">
+          {fontes.map((f, i) => (
+            <a
+              key={i}
+              href={f.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-blue-600 hover:underline"
+              title={f.url}
+            >
+              <span className="text-gray-400">{dominio(f.url)}</span> · {f.titulo || f.url}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -679,24 +716,7 @@ export function ChatFab() {
                           ) : (
                             <FormattedMessage content={msg.content as string} />
                           )}
-                          {!!msg.fontes?.length && (
-                            <div className="mt-2 pt-2 border-t border-gray-200/70 flex flex-col gap-1">
-                              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
-                                Fontes da web
-                              </span>
-                              {msg.fontes.slice(0, 4).map((f, fi) => (
-                                <a
-                                  key={fi}
-                                  href={f.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-[11px] text-blue-600 hover:underline truncate"
-                                >
-                                  {f.titulo || f.url}
-                                </a>
-                              ))}
-                            </div>
-                          )}
+                          {!!msg.fontes?.length && <Fontes fontes={msg.fontes} />}
                         </div>
                       </div>
                       {isLast && msg.role === 'assistant' && pendingAction && !loading && (

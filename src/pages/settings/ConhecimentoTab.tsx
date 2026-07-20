@@ -85,8 +85,9 @@ export function ConhecimentoTab({ restauranteId }: { restauranteId: number | nul
     if (!url.trim()) return
     setProcessando(true)
     try {
-      const { titulo, texto: conteudo } = await extrairTextoDeUrl(url.trim())
-      await indexar({ titulo, texto: conteudo, origem: 'url', url: url.trim() })
+      const r = await extrairTextoDeUrl(url.trim())
+      if (!r.ok) throw new Error(r.motivo || 'Página sem texto legível')
+      await indexar({ titulo: r.titulo!, texto: r.texto!, origem: 'url', url: url.trim() })
     } catch (err: any) {
       toast({ title: 'Não foi possível ler a página', description: err.message, variant: 'destructive' })
       setProcessando(false)

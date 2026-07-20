@@ -49,14 +49,35 @@ export function dividirEmTrechos(texto: string): string[] {
 
 async function chamarConhecimento(body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke('conhecimento-ia', { body })
-  if (error) throw new Error(error.message)
+  if (error) {
+    // invoke() só devolve "non-2xx status code"; a mensagem real vem no corpo
+    let detalhe = error.message
+    try {
+      const corpo = await (error as any).context?.json?.()
+      if (corpo?.error) detalhe = corpo.error
+    } catch { /* mantém a mensagem original */ }
+    throw new Error(detalhe)
+  }
   if (data?.error) throw new Error(data.error)
   return data
 }
 
-export async function extrairTextoDeUrl(url: string): Promise<{ titulo: string; texto: string }> {
-  const data = await chamarConhecimento({ acao: 'extrair_url', url })
-  return { titulo: data.titulo, texto: data.texto }
+export interface ResultadoPagina {
+  ok: boolean
+  titulo?: string
+  texto?: string
+  motivo?: string
+}
+
+/** Lê uma página. Nunca lança por página ruim — devolve ok:false com o motivo. */
+export async function extrairTextoDeUrl(url: string): Promise<ResultadoPagina> {
+  try {
+    const data = await chamarConhecimento({ acao: 'extrair_url', url })
+    if (data?.ok === false) return { ok: false, motivo: data.motivo }
+    return { ok: true, titulo: data.titulo, texto: data.texto }
+  } catch (err: any) {
+    return { ok: false, motivo: err.message }
+  }
 }
 
 /** Lê o texto de um PDF no próprio navegador. */
