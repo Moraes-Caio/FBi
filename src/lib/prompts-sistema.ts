@@ -38,21 +38,33 @@ function bloco(titulo: string, conteudo: string): string {
   return c ? `\n\n## ${titulo}\n${c}` : ''
 }
 
-/** Marcador que a IA devolve quando precisa consultar a web antes de responder. */
+/** Marcadores que a IA devolve quando precisa de informação externa. */
 export const MARCADOR_BUSCA = 'PRECISO_BUSCAR'
+export const MARCADOR_LEITURA = 'PRECISO_LER'
 
-const REGRA_BUSCA_WEB = `SOBRE BUSCAR NA INTERNET:
+const REGRA_BUSCA_WEB = `SOBRE CONSULTAR A INTERNET:
 Seu conhecimento interno é desatualizado e não serve para dados do mundo real.
-Se para responder bem você precisar de QUALQUER informação que não esteja nos dados
-deste restaurante — por exemplo: legislação e normas (ANVISA, vigilância sanitária,
-trabalhista), tendências e novidades do setor, preços de insumos, fornecedores,
-concorrentes, datas comemorativas, receitas, marketing, ferramentas, notícias, ou
-qualquer coisa que mude com o tempo — responda APENAS com a palavra ${MARCADOR_BUSCA}
-e mais nada. O sistema fará a pesquisa e chamará você de novo com os resultados.
+Você tem duas ferramentas e pode pedir qualquer uma delas:
 
-NÃO use ${MARCADOR_BUSCA} para perguntas sobre os dados do próprio restaurante
-(avaliações, satisfação, categorias, garçons, insights, ações) — esses dados já estão
-abaixo e devem ser respondidos direto.`
+1) PESQUISAR NA WEB — responda APENAS com:
+   ${MARCADOR_BUSCA}: <os termos exatos que devem ser pesquisados>
+   Escreva termos específicos e bons, como você digitaria no Google.
+   Ex: ${MARCADOR_BUSCA}: preço médio arroba boi gordo São Paulo hoje
+
+2) LER UMA PÁGINA ESPECÍFICA — responda APENAS com:
+   ${MARCADOR_LEITURA}: <o endereço completo do site>
+   Use quando souber exatamente a página que responde, ou quando o usuário mandar um link.
+   Ex: ${MARCADOR_LEITURA}: https://www.gov.br/anvisa/...
+
+Use uma dessas sempre que precisar de algo que não esteja nos dados deste restaurante:
+legislação e normas (ANVISA, vigilância sanitária, trabalhista), tendências do setor,
+preços de insumos, fornecedores, concorrentes, datas comemorativas, receitas, marketing,
+ferramentas, notícias — ou qualquer coisa que mude com o tempo.
+
+NÃO use esses marcadores para perguntas sobre os dados do próprio restaurante
+(avaliações, satisfação, categorias, garçons, insights, ações) nem quando os trechos
+dos materiais de treinamento já responderem — nesses casos responda direto.
+Ao usar um marcador, não escreva mais nada junto.`
 
 const REGRA_POS_BUSCA = `Uma busca na internet foi feita e os resultados estão disponíveis.
 Responda usando essas informações atuais, citando o site de origem entre parênteses.
@@ -111,6 +123,20 @@ ${REGRAS_RESPOSTA}`
 
   if (ctx.usuario?.nome) {
     prompt += bloco('Com quem você está falando', `${ctx.usuario.nome}, responsável pelo restaurante.`)
+  }
+
+  // Trechos recuperados dos documentos de treinamento (busca vetorial)
+  if (ctx.conhecimento?.length) {
+    prompt += bloco(
+      'Trechos dos materiais de treinamento (use como fonte principal)',
+      ctx.conhecimento
+        .map(
+          (t: any, i: number) =>
+            `[${i + 1}] (${t.titulo}${t.escopo === 'global' ? ', material de referência' : ''})\n"${t.conteudo}"`,
+        )
+        .join('\n\n') +
+        '\n\nEstes trechos vieram dos documentos que o dono cadastrou. Quando responder com base neles, diga de qual material saiu. Se não responderem a pergunta, ignore-os.',
+    )
   }
 
   if (ctx.memoria?.length) {

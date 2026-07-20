@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { RestaurantTab, RestauranteForm } from './settings/RestaurantTab'
 import { MascotTab, MascoteForm } from './settings/MascotTab'
 import { PerfilNegocioTab, PerfilNegocioForm, PERFIL_VAZIO } from './settings/PerfilNegocioTab'
+import { ConhecimentoTab } from './settings/ConhecimentoTab'
 import { WhatsAppTab } from './settings/WhatsAppTab'
 import { useUserProfile } from '@/hooks/use-user-profile'
 import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
@@ -185,6 +186,7 @@ export default function Settings() {
   const navItems = [
     { id: 'restaurante', label: 'Restaurante' },
     { id: 'perfil', label: 'Sobre o restaurante' },
+    { id: 'conhecimento', label: 'Base de conhecimento' },
     { id: 'whatsapp', label: 'WhatsApp' },
     { id: 'mascote', label: 'Assistente de IA' },
   ]
@@ -239,6 +241,9 @@ export default function Settings() {
               </section>
               <section id="perfil" className="scroll-mt-28">
                 <PerfilNegocioTab value={perfil} onChange={setPerfil} />
+              </section>
+              <section id="conhecimento" className="scroll-mt-28">
+                <ConhecimentoTab restauranteId={restauranteId} />
               </section>
               <section id="whatsapp" className="scroll-mt-28">
                 <WhatsAppTab restauranteId={restauranteId} />

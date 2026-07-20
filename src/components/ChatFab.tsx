@@ -102,8 +102,9 @@ export function ChatFab() {
   const { user, usuario } = useAuth()
   const { mascote } = useRestauranteConfig()
   const mascoteNome = mascote.nome
-
-  if (pathname === '/sugestoes') return null
+  // O return condicional fica no fim do componente: sair antes dos hooks
+  // muda a quantidade de hooks entre renders e quebra o React.
+  const ocultar = pathname === '/sugestoes'
   const { toast } = useToast()
   const {
     messages, loading, buscandoWeb, sessaoId, enviar, adicionarMensagemUsuario,
@@ -479,6 +480,8 @@ export function ChatFab() {
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  if (ocultar) return null
 
   const messagesToRender =
     messages.length === 0

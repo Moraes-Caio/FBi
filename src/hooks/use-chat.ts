@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { enviarMensagem, enviarMensagemComFontes, ChatMessage, FonteWeb } from '@/lib/openrouter'
-import { construirSystemPromptChef, MARCADOR_BUSCA } from '@/lib/prompts-sistema'
+import { construirSystemPromptChef, MARCADOR_BUSCA, MARCADOR_LEITURA } from '@/lib/prompts-sistema'
 import { memorizarDaConversa, FatoMemoria } from '@/lib/queries/memoria-assistente'
+import { buscarConhecimento, extrairTextoDeUrl as lerPagina } from '@/lib/queries/conhecimento'
 
 export interface MensagemChat {
   id?: string
@@ -27,6 +28,8 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
   const [error, setError] = useState<string | null>(null)
   // Espelha o state para o envio não depender de um render acontecer antes
   const messagesRef = useRef<MensagemChat[]>([])
+  // Trava recargas de histórico enquanto há um envio em andamento
+  const enviandoRef = useRef(false)
 
   const aplicar = useCallback((fn: (prev: MensagemChat[]) => MensagemChat[]) => {
     const novo = fn(messagesRef.current)
@@ -75,25 +78,37 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     }
   }
 
-  const carregarHistorico = async (id: string) => {
-    const { data } = await supabase
-      .from('mensagens_chat')
-      .select('*')
-      .eq('sessao_id', id)
-      .order('created_at', { ascending: true })
+  /**
+   * IMPORTANTE: precisa ser estável (useCallback). Sem isso, um efeito que a
+   * tenha como dependência dispara a cada render e recarrega o histórico do
+   * banco por cima das mensagens locais — apagando a mensagem recém-enviada
+   * e a resposta da IA antes delas terem sido gravadas.
+   */
+  const carregarHistorico = useCallback(
+    async (id: string) => {
+      // Não sobrescreve o que está na tela durante um envio em andamento
+      if (enviandoRef.current) return
 
-    if (data) {
-      aplicar(() =>
-        data.map((m) => ({
-          id: m.id,
-          role: m.papel === 'usuario' ? ('user' as const) : ('assistant' as const),
-          text: m.mensagem,
-          // a imagem fica em contexto_dados (o schema de mensagens_chat não é alterado)
-          imageUrl: (m.contexto_dados as any)?.imagem || undefined,
-        })),
-      )
-    }
-  }
+      const { data } = await supabase
+        .from('mensagens_chat')
+        .select('*')
+        .eq('sessao_id', id)
+        .order('created_at', { ascending: true })
+
+      if (data && !enviandoRef.current) {
+        aplicar(() =>
+          data.map((m) => ({
+            id: m.id,
+            role: m.papel === 'usuario' ? ('user' as const) : ('assistant' as const),
+            text: m.mensagem,
+            // a imagem fica em contexto_dados (o schema de mensagens_chat não é alterado)
+            imageUrl: (m.contexto_dados as any)?.imagem || undefined,
+          })),
+        )
+      }
+    },
+    [aplicar],
+  )
 
   const enviar = async (
     texto: string,
@@ -102,6 +117,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     imageUrl?: string,
     opcoes: { jaExibida?: boolean; memoria?: FatoMemoria[]; buscaWeb?: boolean } = {},
   ): Promise<ResultadoEnvio> => {
+    enviandoRef.current = true
     setLoading(true)
     setError(null)
 
@@ -113,6 +129,12 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
     try {
       const contextoFinal = { ...contextoDadosIniciais, ...contextoDadosAdicionais }
+
+      // RAG: busca vetorial nos documentos de treinamento antes de montar o prompt
+      if (texto && !systemMessageOverride) {
+        contextoFinal.conhecimento = await buscarConhecimento(texto, 5)
+      }
+
       const podeBuscar = opcoes.buscaWeb !== false && !systemMessageOverride
       const sysPrompt =
         systemMessageOverride ||
@@ -138,20 +160,55 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
       let { texto: respostaTexto, fontes } = await enviarMensagemComFontes(apiMessages)
 
-      // A IA sinalizou que precisa de informação externa: refaz com busca na web.
-      // Só gastamos uma busca quando ela própria diz que precisa.
-      if (podeBuscar && respostaTexto.trim().toUpperCase().startsWith(MARCADOR_BUSCA)) {
+      // A IA sinalizou que precisa de informação externa. Só gastamos uma
+      // consulta quando ela própria diz que precisa.
+      const bruto = respostaTexto.trim()
+      const pedeBusca = bruto.toUpperCase().startsWith(MARCADOR_BUSCA)
+      const pedeLeitura = bruto.toUpperCase().startsWith(MARCADOR_LEITURA)
+
+      if (podeBuscar && (pedeBusca || pedeLeitura)) {
         setBuscandoWeb(true)
         try {
-          const promptComBusca = construirSystemPromptChef(contextoFinal.mascote_config, contextoFinal, {
-            jaBuscou: true,
-          })
-          const comWeb = await enviarMensagemComFontes(
-            [{ role: 'system', content: promptComBusca }, ...apiMessages.slice(1)],
-            { web: true },
+          const promptComBusca = construirSystemPromptChef(
+            contextoFinal.mascote_config,
+            contextoFinal,
+            { jaBuscou: true },
           )
-          respostaTexto = comWeb.texto
-          fontes = comWeb.fontes
+          const historico = apiMessages.slice(1)
+
+          if (pedeLeitura) {
+            // Lê a página pedida e devolve o conteúdo para a IA responder
+            const url = bruto.slice(MARCADOR_LEITURA.length).replace(/^[:\s]+/, '').trim()
+            const pagina = await lerPagina(url)
+            respostaTexto = (
+              await enviarMensagemComFontes([
+                { role: 'system', content: promptComBusca },
+                ...historico,
+                {
+                  role: 'system',
+                  content: `Conteúdo da página ${url} (${pagina.titulo}):\n\n${pagina.texto.slice(0, 12000)}`,
+                },
+              ])
+            ).texto
+            fontes = [{ url, titulo: pagina.titulo }]
+          } else {
+            // Pesquisa com os termos que a própria IA escolheu
+            const termos = bruto.slice(MARCADOR_BUSCA.length).replace(/^[:\s]+/, '').trim()
+            const comWeb = await enviarMensagemComFontes(
+              [
+                { role: 'system', content: promptComBusca },
+                ...historico,
+                ...(termos
+                  ? [{ role: 'system' as const, content: `Pesquise por: ${termos}` }]
+                  : []),
+              ],
+              { web: true },
+            )
+            respostaTexto = comWeb.texto
+            fontes = comWeb.fontes
+          }
+        } catch (err: any) {
+          respostaTexto = `Não consegui consultar essa informação agora (${err.message}). Pode tentar de novo ou me dizer o que encontrou?`
         } finally {
           setBuscandoWeb(false)
         }
@@ -214,6 +271,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
       setError(msg)
       return { error: msg }
     } finally {
+      enviandoRef.current = false
       setLoading(false)
     }
   }
