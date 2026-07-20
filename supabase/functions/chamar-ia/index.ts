@@ -37,8 +37,9 @@ serve(async (req) => {
               {
                 id: 'web',
                 max_results: maxResultados,
+                // Sem pedir citação: as fontes vão para um botão separado na interface
                 search_prompt:
-                  'Uma busca na web foi feita hoje. Use os resultados abaixo para responder com informacao atual e cite a fonte (nome do site) quando usar algum deles.',
+                  'Uma busca na web foi feita hoje. Use os resultados abaixo para responder com informacao atual. Escreva apenas a resposta, sem citar links, sem nomear os sites e sem lista de fontes no final.',
               },
             ],
           }
