@@ -38,6 +38,9 @@ import { useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { FormattedMessage } from '@/lib/chat-utils'
 import { useChat } from '@/hooks/use-chat'
+import { buscarMemoria, FatoMemoria } from '@/lib/queries/memoria-assistente'
+import { buscarKpis } from '@/lib/queries/visao-geral'
+import { buscarEstatisticasRelatorio } from '@/lib/queries/relatorios'
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/use-auth'
 import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
@@ -101,8 +104,10 @@ export function ChatFab() {
 
   if (pathname === '/sugestoes') return null
   const { toast } = useToast()
-  const { messages, loading, sessaoId, enviar, carregarHistorico, detectarIntencao, novaConversa, mudarSessao } =
-    useChat('global')
+  const {
+    messages, loading, sessaoId, enviar, adicionarMensagemUsuario,
+    carregarHistorico, novaConversa, mudarSessao,
+  } = useChat('global')
 
   const [open, setOpen] = useState(false)
   const [message, setMessage] = useState('')
@@ -113,6 +118,9 @@ export function ChatFab() {
   const [renameValue, setRenameValue] = useState('')
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [imagemUrl, setImagemUrl] = useState<string | null>(null) // URL pública já hospedada
+  const [enviandoImagem, setEnviandoImagem] = useState(false)
+  const memoriaRef = useRef<FatoMemoria[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -293,57 +301,119 @@ export function ChatFab() {
 
   // ── Image upload ───────────────────────────────────────────────────────────
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
     if (file.size > 5 * 1024 * 1024) {
       toast({ title: 'Imagem muito grande', description: 'Máximo 5 MB', variant: 'destructive' })
       return
     }
-    const reader = new FileReader()
-    reader.onload = (ev) => setImagePreview(ev.target?.result as string)
-    reader.readAsDataURL(file)
-    e.target.value = ''
+
+    // Preview local imediato; o upload acontece por trás
+    const objetoUrl = URL.createObjectURL(file)
+    setImagePreview(objetoUrl)
+    setEnviandoImagem(true)
+    try {
+      const ext = file.name.split('.').pop() || 'jpg'
+      const caminho = `${user?.id ?? 'anon'}/${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('chat-imagens').upload(caminho, file, { upsert: true })
+      if (error) throw error
+      const { data: { publicUrl } } = supabase.storage.from('chat-imagens').getPublicUrl(caminho)
+      setImagemUrl(publicUrl)
+    } catch (err: any) {
+      toast({ title: 'Erro ao enviar imagem', description: err.message, variant: 'destructive' })
+      setImagePreview(null)
+      URL.revokeObjectURL(objetoUrl)
+    } finally {
+      setEnviandoImagem(false)
+    }
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────
 
+  /** Reúne, de forma organizada, tudo que a IA precisa saber para responder. */
   const fetchContexto = async () => {
     if (!user) return {}
     const rId = usuario?.restaurante_id ?? null
-    const [feedbacksRes, insightsRes, configRes] = await Promise.all([
-      supabase.from('feedbacks_restaurante').select('*').order('created_at', { ascending: false }).limit(20),
-      rId ? supabase.from('insights').select('*').eq('ativo', true).eq('restaurante_id', rId) : Promise.resolve({ data: [] }),
-      rId ? supabase.from('restaurantes').select('mascote_config').eq('id', rId).single() : Promise.resolve({ data: null }),
-    ])
+    const vazio = Promise.resolve({ data: [] as any[] })
+
+    const [feedbacksRes, insightsRes, acoesRes, garconsRes, configRes, kpis, estatisticas, memoria] =
+      await Promise.all([
+        rId
+          ? supabase
+              .from('feedbacks_restaurante')
+              .select('created_at, categoria, sentimento, texto_original, resumo')
+              .eq('restaurante_id', rId) // antes buscava sem filtrar por restaurante
+              .order('created_at', { ascending: false })
+              .limit(25)
+          : vazio,
+        rId
+          ? supabase.from('insights').select('titulo, descricao, prioridade')
+              .eq('ativo', true).eq('restaurante_id', rId).limit(10)
+          : vazio,
+        rId
+          ? supabase.from('acoes_operacionais').select('titulo_acao, status')
+              .neq('status', 'CONCLUIDO').limit(10)
+          : vazio,
+        rId ? supabase.from('garcons').select('nome_garcon').eq('restaurante_id', rId).eq('ativo', true) : vazio,
+        rId
+          ? supabase.from('restaurantes')
+              .select('nome_restaurante, detalhes, mascote_config').eq('id', rId).single()
+          : Promise.resolve({ data: null as any }),
+        buscarKpis(rId, '30d').catch(() => null),
+        buscarEstatisticasRelatorio(rId, '30d').catch(() => null),
+        buscarMemoria(rId),
+      ])
+
+    memoriaRef.current = memoria
+
     return {
-      feedbacks: feedbacksRes.data || [],
-      insights: insightsRes.data || [],
-      mascote_config: configRes.data?.mascote_config,
       restaurante_id: rId,
+      restaurante: configRes.data
+        ? {
+            nome_restaurante: configRes.data.nome_restaurante,
+            detalhes: (configRes.data as any).detalhes,
+          }
+        : null,
+      usuario: { nome: usuario?.nome ?? null },
+      mascote_config: configRes.data?.mascote_config,
+      memoria,
+      kpis,
+      categorias: estatisticas?.porCategoria ?? [],
+      garcons: garconsRes.data || [],
+      insights: insightsRes.data || [],
+      acoes: acoesRes.data || [],
+      feedbacks: feedbacksRes.data || [],
     }
   }
 
   const handleSend = async (text: string, img?: string | null) => {
     const msgTexto = text.trim()
-    const msgImg = img !== undefined ? img : imagePreview
-    if ((!msgTexto && !msgImg) || loading) return
+    const msgImg = img !== undefined ? img : imagemUrl
+    if ((!msgTexto && !msgImg) || loading || enviandoImagem) return
 
     setMessage('')
     setImagePreview(null)
+    setImagemUrl(null)
     setHasError(false)
     setFailedMessage('')
     setPendingAction(null)
 
+    // A mensagem aparece na hora — buscar contexto e chamar a IA vem depois
+    adicionarMensagemUsuario(msgTexto, msgImg || undefined)
+
     const contexto = await fetchContexto()
-    const intencao = await detectarIntencao(msgTexto, contexto)
-    const result = await enviar(msgTexto, contexto, undefined, msgImg || undefined)
+    const result = await enviar(msgTexto, contexto, undefined, msgImg || undefined, {
+      jaExibida: true,
+      memoria: memoriaRef.current,
+    })
 
     if (result?.error) {
       setHasError(true)
       setFailedMessage(msgTexto)
-    } else if (intencao?.tipo) {
-      setPendingAction({ tipo: intencao.tipo, dados: intencao.dadosSugeridos })
+    } else if (result?.intent) {
+      setPendingAction({ tipo: result.intent, dados: result.suggestedData })
     }
   }
 
@@ -662,8 +732,13 @@ export function ChatFab() {
                 {imagePreview && (
                   <div className="relative w-fit">
                     <img src={imagePreview} alt="preview" className="h-20 w-20 object-cover rounded-lg border border-gray-200" />
+                    {enviandoImagem && (
+                      <div className="absolute inset-0 bg-black/45 rounded-lg flex items-center justify-center">
+                        <RefreshCw className="h-4 w-4 text-white animate-spin" />
+                      </div>
+                    )}
                     <button
-                      onClick={() => setImagePreview(null)}
+                      onClick={() => { setImagePreview(null); setImagemUrl(null) }}
                       className="absolute -top-1.5 -right-1.5 h-5 w-5 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-gray-900"
                     >
                       <X className="h-3 w-3" />
@@ -705,7 +780,7 @@ export function ChatFab() {
                     size="icon"
                     className="absolute right-2 bottom-2 h-8 w-8 bg-[#1D4ED8] hover:bg-blue-800 text-white rounded-lg disabled:opacity-50"
                     onClick={() => handleSend(message)}
-                    disabled={(!message.trim() && !imagePreview) || loading}
+                    disabled={(!message.trim() && !imagemUrl) || loading || enviandoImagem}
                   >
                     <Send className="h-4 w-4" />
                   </Button>
