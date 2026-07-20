@@ -38,7 +38,31 @@ function bloco(titulo: string, conteudo: string): string {
   return c ? `\n\n## ${titulo}\n${c}` : ''
 }
 
-export function construirSystemPromptChef(mascoteConfig: any, contextoDados?: any) {
+/** Marcador que a IA devolve quando precisa consultar a web antes de responder. */
+export const MARCADOR_BUSCA = 'PRECISO_BUSCAR'
+
+const REGRA_BUSCA_WEB = `SOBRE BUSCAR NA INTERNET:
+Seu conhecimento interno é desatualizado e não serve para dados do mundo real.
+Se para responder bem você precisar de QUALQUER informação que não esteja nos dados
+deste restaurante — por exemplo: legislação e normas (ANVISA, vigilância sanitária,
+trabalhista), tendências e novidades do setor, preços de insumos, fornecedores,
+concorrentes, datas comemorativas, receitas, marketing, ferramentas, notícias, ou
+qualquer coisa que mude com o tempo — responda APENAS com a palavra ${MARCADOR_BUSCA}
+e mais nada. O sistema fará a pesquisa e chamará você de novo com os resultados.
+
+NÃO use ${MARCADOR_BUSCA} para perguntas sobre os dados do próprio restaurante
+(avaliações, satisfação, categorias, garçons, insights, ações) — esses dados já estão
+abaixo e devem ser respondidos direto.`
+
+const REGRA_POS_BUSCA = `Uma busca na internet foi feita e os resultados estão disponíveis.
+Responda usando essas informações atuais, citando o site de origem entre parênteses.
+Se os resultados não responderem, diga isso com honestidade em vez de inventar.`
+
+export function construirSystemPromptChef(
+  mascoteConfig: any,
+  contextoDados?: any,
+  opcoes: { podeBuscarWeb?: boolean; jaBuscou?: boolean } = {},
+) {
   const nome = mascoteConfig?.nome?.trim() || 'Chef Pepê'
   // 'profissional_amigavel' não existe no mapa de personalidades — o padrão real é 'direto_objetivo'
   const personalidade = getPersonalidadePrompt(mascoteConfig?.personalidade || 'direto_objetivo')
@@ -51,16 +75,35 @@ ${SOBRE_O_SISTEMA}
 
 ${REGRAS_RESPOSTA}`
 
+  if (opcoes.jaBuscou) prompt += `\n\n${REGRA_POS_BUSCA}`
+  else if (opcoes.podeBuscarWeb) prompt += `\n\n${REGRA_BUSCA_WEB}`
+
   // ── Contexto organizado por assunto (em vez de um JSON solto) ──
   const r = ctx.restaurante
   if (r) {
+    const p = r.perfil || {}
+    const servicos = Array.isArray(p.servicos) && p.servicos.length ? p.servicos.join(', ') : ''
     prompt += bloco(
-      'Restaurante',
+      'Perfil do restaurante',
       [
         `Nome: ${r.nome_restaurante || 'não informado'}`,
-        r.detalhes ? `Sobre: ${r.detalhes}` : '',
+        r.tipo_culinaria ? `Tipo de cozinha: ${r.tipo_culinaria}` : '',
+        p.estilo ? `Estilo: ${p.estilo}` : '',
+        p.localizacao ? `Localização: ${p.localizacao}` : '',
+        r.numero_mesas ? `Mesas: ${r.numero_mesas}` : '',
+        p.capacidade_lugares ? `Capacidade: ${p.capacidade_lugares} lugares` : '',
+        p.num_funcionarios ? `Equipe: ${p.num_funcionarios} funcionários` : '',
+        p.faixa_preco ? `Ticket médio / faixa de preço: ${p.faixa_preco}` : '',
+        p.horario_funcionamento ? `Horário de funcionamento: ${p.horario_funcionamento}` : '',
+        p.publico_alvo ? `Público: ${p.publico_alvo}` : '',
+        p.pratos_destaque ? `Pratos de destaque: ${p.pratos_destaque}` : '',
+        servicos ? `Serviços oferecidos: ${servicos}` : '',
+        p.diferenciais ? `Diferenciais: ${p.diferenciais}` : '',
+        p.desafios ? `Desafios atuais relatados pelo dono: ${p.desafios}` : '',
+        p.ano_abertura ? `Aberto desde: ${p.ano_abertura}` : '',
+        r.detalhes ? `\nO dono descreve o restaurante assim:\n${r.detalhes}` : '',
         Array.isArray(mascoteConfig?.focos) && mascoteConfig.focos.length
-          ? `O dono pediu atenção especial a: ${mascoteConfig.focos.join(', ')}.`
+          ? `\nO dono pediu atenção especial a: ${mascoteConfig.focos.join(', ')}.`
           : '',
       ].filter(Boolean).join('\n'),
     )

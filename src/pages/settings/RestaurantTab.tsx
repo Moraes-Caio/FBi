@@ -1,7 +1,6 @@
 import { useState, useRef } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Card,
   CardContent,
@@ -16,7 +15,6 @@ import { Upload, Store, Loader2, X } from 'lucide-react'
 
 export interface RestauranteForm {
   nome_restaurante: string
-  detalhes: string
   logo_url: string
 }
 
@@ -163,19 +161,10 @@ export function RestaurantTab({
                   className="max-w-md"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="detalhes" className="text-gray-700">
-                  Detalhes & Especialidade
-                </Label>
-                <Textarea
-                  id="detalhes"
-                  value={value.detalhes}
-                  onChange={(e) => onChange({ ...value, detalhes: e.target.value })}
-                  placeholder="Conte um pouco sobre a especialidade, história ou diferenciais do restaurante..."
-                  rows={4}
-                  className="resize-none"
-                />
-              </div>
+              <p className="text-xs text-muted-foreground">
+                Os dados do negócio (cozinha, mesas, público, diferenciais…) ficam na seção
+                <b> Sobre o restaurante</b>.
+              </p>
             </div>
           </div>
         </section>

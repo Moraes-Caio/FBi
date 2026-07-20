@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { RestaurantTab, RestauranteForm } from './settings/RestaurantTab'
 import { MascotTab, MascoteForm } from './settings/MascotTab'
+import { PerfilNegocioTab, PerfilNegocioForm, PERFIL_VAZIO } from './settings/PerfilNegocioTab'
 import { WhatsAppTab } from './settings/WhatsAppTab'
 import { useUserProfile } from '@/hooks/use-user-profile'
 import { useRestauranteConfig } from '@/hooks/use-restaurante-config'
@@ -12,8 +13,21 @@ import { useToast } from '@/hooks/use-toast'
 import { supabase } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
-const RESTAURANTE_VAZIO: RestauranteForm = { nome_restaurante: '', detalhes: '', logo_url: '' }
+const RESTAURANTE_VAZIO: RestauranteForm = { nome_restaurante: '', logo_url: '' }
 const MASCOTE_VAZIO: MascoteForm = { nome: '', personalidade: 'direto_objetivo', foto_url: '' }
+
+/**
+ * O que vai para a coluna jsonb. Fica de fora o que já tem coluna própria
+ * (tipo_culinaria, numero_mesas, detalhes) para não guardar o dado em dois lugares.
+ */
+function perfilParaJson(p: PerfilNegocioForm) {
+  const { tipo_culinaria, numero_mesas, detalhes, ...resto } = p
+  const limpo: Record<string, unknown> = {}
+  for (const [chave, valor] of Object.entries(resto)) {
+    if (Array.isArray(valor) ? valor.length : String(valor ?? '').trim()) limpo[chave] = valor
+  }
+  return limpo
+}
 
 export default function Settings() {
   const { profile, loading } = useUserProfile()
@@ -25,7 +39,8 @@ export default function Settings() {
   const [carregandoDados, setCarregandoDados] = useState(true)
   const [restaurante, setRestaurante] = useState<RestauranteForm>(RESTAURANTE_VAZIO)
   const [mascote, setMascote] = useState<MascoteForm>(MASCOTE_VAZIO)
-  const [salvo, setSalvo] = useState({ restaurante: RESTAURANTE_VAZIO, mascote: MASCOTE_VAZIO })
+  const [perfil, setPerfil] = useState<PerfilNegocioForm>(PERFIL_VAZIO)
+  const [salvo, setSalvo] = useState({ restaurante: RESTAURANTE_VAZIO, mascote: MASCOTE_VAZIO, perfil: PERFIL_VAZIO })
   // Guarda o mascote_config original para não apagar campos que não estão no
   // formulário (ex: "focos", gravado no onboarding e usado no contexto da IA)
   const mascoteBruto = useRef<Record<string, unknown>>({})
@@ -44,7 +59,7 @@ export default function Settings() {
     const carregar = async () => {
       const { data } = await supabase
         .from('restaurantes')
-        .select('nome_restaurante, detalhes, logo_url, mascote_config')
+        .select('nome_restaurante, detalhes, logo_url, mascote_config, perfil_restaurante, tipo_culinaria, numero_mesas')
         .eq('id', restauranteId)
         .single()
 
@@ -53,8 +68,16 @@ export default function Settings() {
         mascoteBruto.current = cfg
         const r: RestauranteForm = {
           nome_restaurante: data.nome_restaurante || '',
-          detalhes: (data as any).detalhes || '',
           logo_url: (data as any).logo_url || '',
+        }
+        const pf = ((data as any).perfil_restaurante as any) || {}
+        const p: PerfilNegocioForm = {
+          ...PERFIL_VAZIO,
+          ...pf,
+          servicos: Array.isArray(pf.servicos) ? pf.servicos : [],
+          tipo_culinaria: (data as any).tipo_culinaria || pf.tipo_culinaria || '',
+          numero_mesas: (data as any).numero_mesas != null ? String((data as any).numero_mesas) : '',
+          detalhes: (data as any).detalhes || '',
         }
         const m: MascoteForm = {
           nome: cfg.nome || '',
@@ -63,7 +86,8 @@ export default function Settings() {
         }
         setRestaurante(r)
         setMascote(m)
-        setSalvo({ restaurante: r, mascote: m })
+        setPerfil(p)
+        setSalvo({ restaurante: r, mascote: m, perfil: p })
       }
       setCarregandoDados(false)
     }
@@ -71,7 +95,7 @@ export default function Settings() {
   }, [loading, restauranteId])
 
   const alterado =
-    JSON.stringify({ restaurante, mascote }) !== JSON.stringify(salvo)
+    JSON.stringify({ restaurante, mascote, perfil }) !== JSON.stringify(salvo)
 
   const handleSalvar = async () => {
     if (!restauranteId) return
@@ -80,9 +104,13 @@ export default function Settings() {
       .from('restaurantes')
       .update({
         nome_restaurante: restaurante.nome_restaurante,
-        detalhes: restaurante.detalhes,
         logo_url: restaurante.logo_url || null,
         mascote_config: { ...mascoteBruto.current, ...mascote },
+        // campos que já existem como coluna continuam nelas
+        detalhes: perfil.detalhes,
+        tipo_culinaria: perfil.tipo_culinaria || null,
+        numero_mesas: perfil.numero_mesas ? Number(perfil.numero_mesas) : null,
+        perfil_restaurante: perfilParaJson(perfil),
       } as any)
       .eq('id', restauranteId)
     setSalvando(false)
@@ -91,7 +119,7 @@ export default function Settings() {
       toast({ title: 'Erro', description: 'Não foi possível salvar.', variant: 'destructive' })
       return
     }
-    setSalvo({ restaurante, mascote })
+    setSalvo({ restaurante, mascote, perfil })
     refetchConfig() // atualiza sidebar, banner e o assistente do chat na hora
     toast({ title: 'Salvo', description: 'Configurações atualizadas.' })
   }
@@ -99,6 +127,7 @@ export default function Settings() {
   const handleDescartar = () => {
     setRestaurante(salvo.restaurante)
     setMascote(salvo.mascote)
+    setPerfil(salvo.perfil)
   }
 
   useEffect(() => {
@@ -155,6 +184,7 @@ export default function Settings() {
 
   const navItems = [
     { id: 'restaurante', label: 'Restaurante' },
+    { id: 'perfil', label: 'Sobre o restaurante' },
     { id: 'whatsapp', label: 'WhatsApp' },
     { id: 'mascote', label: 'Assistente de IA' },
   ]
@@ -206,6 +236,9 @@ export default function Settings() {
                   onChange={setRestaurante}
                   onUploadingChange={setEnviandoArquivo}
                 />
+              </section>
+              <section id="perfil" className="scroll-mt-28">
+                <PerfilNegocioTab value={perfil} onChange={setPerfil} />
               </section>
               <section id="whatsapp" className="scroll-mt-28">
                 <WhatsAppTab restauranteId={restauranteId} />

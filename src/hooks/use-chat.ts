@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase/client'
-import { enviarMensagem, ChatMessage } from '@/lib/openrouter'
-import { construirSystemPromptChef } from '@/lib/prompts-sistema'
+import { enviarMensagem, enviarMensagemComFontes, ChatMessage, FonteWeb } from '@/lib/openrouter'
+import { construirSystemPromptChef, MARCADOR_BUSCA } from '@/lib/prompts-sistema'
 import { memorizarDaConversa, FatoMemoria } from '@/lib/queries/memoria-assistente'
 
 export interface MensagemChat {
@@ -11,6 +11,7 @@ export interface MensagemChat {
   imageUrl?: string
   intent?: 'criar_acao' | 'criar_insight' | null
   suggestedData?: any
+  fontes?: FonteWeb[]
 }
 
 export interface ResultadoEnvio {
@@ -22,6 +23,7 @@ export interface ResultadoEnvio {
 export function useChat(contextoPagina: string, contextoDadosIniciais: any = {}) {
   const [messages, setMessages] = useState<MensagemChat[]>([])
   const [loading, setLoading] = useState(false)
+  const [buscandoWeb, setBuscandoWeb] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Espelha o state para o envio não depender de um render acontecer antes
   const messagesRef = useRef<MensagemChat[]>([])
@@ -98,7 +100,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     contextoDadosAdicionais: any = {},
     systemMessageOverride?: string,
     imageUrl?: string,
-    opcoes: { jaExibida?: boolean; memoria?: FatoMemoria[] } = {},
+    opcoes: { jaExibida?: boolean; memoria?: FatoMemoria[]; buscaWeb?: boolean } = {},
   ): Promise<ResultadoEnvio> => {
     setLoading(true)
     setError(null)
@@ -111,8 +113,12 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
     try {
       const contextoFinal = { ...contextoDadosIniciais, ...contextoDadosAdicionais }
+      const podeBuscar = opcoes.buscaWeb !== false && !systemMessageOverride
       const sysPrompt =
-        systemMessageOverride || construirSystemPromptChef(contextoFinal.mascote_config, contextoFinal)
+        systemMessageOverride ||
+        construirSystemPromptChef(contextoFinal.mascote_config, contextoFinal, {
+          podeBuscarWeb: podeBuscar,
+        })
 
       const apiMessages: ChatMessage[] = [
         { role: 'system', content: sysPrompt },
@@ -130,11 +136,29 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
         }),
       ]
 
-      const resposta = await enviarMensagem(apiMessages)
-      const respostaTexto = typeof resposta === 'string' ? resposta : JSON.stringify(resposta)
+      let { texto: respostaTexto, fontes } = await enviarMensagemComFontes(apiMessages)
+
+      // A IA sinalizou que precisa de informação externa: refaz com busca na web.
+      // Só gastamos uma busca quando ela própria diz que precisa.
+      if (podeBuscar && respostaTexto.trim().toUpperCase().startsWith(MARCADOR_BUSCA)) {
+        setBuscandoWeb(true)
+        try {
+          const promptComBusca = construirSystemPromptChef(contextoFinal.mascote_config, contextoFinal, {
+            jaBuscou: true,
+          })
+          const comWeb = await enviarMensagemComFontes(
+            [{ role: 'system', content: promptComBusca }, ...apiMessages.slice(1)],
+            { web: true },
+          )
+          respostaTexto = comWeb.texto
+          fontes = comWeb.fontes
+        } finally {
+          setBuscandoWeb(false)
+        }
+      }
 
       // Mostra a resposta assim que chega; a intenção é detectada depois
-      aplicar((prev) => [...prev, { role: 'assistant', text: respostaTexto }])
+      aplicar((prev) => [...prev, { role: 'assistant', text: respostaTexto, fontes }])
 
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
@@ -213,6 +237,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
   return {
     messages,
     loading,
+    buscandoWeb,
     error,
     enviar,
     adicionarMensagemUsuario,

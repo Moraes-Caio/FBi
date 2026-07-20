@@ -12,6 +12,7 @@ import {
   Trash2,
   ImageIcon,
   X,
+  Globe,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -105,7 +106,7 @@ export function ChatFab() {
   if (pathname === '/sugestoes') return null
   const { toast } = useToast()
   const {
-    messages, loading, sessaoId, enviar, adicionarMensagemUsuario,
+    messages, loading, buscandoWeb, sessaoId, enviar, adicionarMensagemUsuario,
     carregarHistorico, novaConversa, mudarSessao,
   } = useChat('global')
 
@@ -359,7 +360,8 @@ export function ChatFab() {
         rId ? supabase.from('garcons').select('nome_garcon').eq('restaurante_id', rId).eq('ativo', true) : vazio,
         rId
           ? supabase.from('restaurantes')
-              .select('nome_restaurante, detalhes, mascote_config').eq('id', rId).single()
+              .select('nome_restaurante, detalhes, mascote_config, perfil_restaurante, tipo_culinaria, numero_mesas')
+              .eq('id', rId).single()
           : Promise.resolve({ data: null as any }),
         buscarKpis(rId, '30d').catch(() => null),
         buscarEstatisticasRelatorio(rId, '30d').catch(() => null),
@@ -374,6 +376,9 @@ export function ChatFab() {
         ? {
             nome_restaurante: configRes.data.nome_restaurante,
             detalhes: (configRes.data as any).detalhes,
+            tipo_culinaria: (configRes.data as any).tipo_culinaria,
+            numero_mesas: (configRes.data as any).numero_mesas,
+            perfil: (configRes.data as any).perfil_restaurante || {},
           }
         : null,
       usuario: { nome: usuario?.nome ?? null },
@@ -477,8 +482,8 @@ export function ChatFab() {
 
   const messagesToRender =
     messages.length === 0
-      ? [{ role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, imageUrl: undefined }]
-      : messages.map((m) => ({ role: m.role, content: m.text, imageUrl: m.imageUrl }))
+      ? [{ role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, imageUrl: undefined, fontes: undefined }]
+      : messages.map((m) => ({ role: m.role, content: m.text, imageUrl: m.imageUrl, fontes: m.fontes }))
 
   return (
     <>
@@ -671,6 +676,24 @@ export function ChatFab() {
                           ) : (
                             <FormattedMessage content={msg.content as string} />
                           )}
+                          {!!msg.fontes?.length && (
+                            <div className="mt-2 pt-2 border-t border-gray-200/70 flex flex-col gap-1">
+                              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                                Fontes da web
+                              </span>
+                              {msg.fontes.slice(0, 4).map((f, fi) => (
+                                <a
+                                  key={fi}
+                                  href={f.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[11px] text-blue-600 hover:underline truncate"
+                                >
+                                  {f.titulo || f.url}
+                                </a>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                       {isLast && msg.role === 'assistant' && pendingAction && !loading && (
@@ -692,10 +715,19 @@ export function ChatFab() {
 
                 {loading && (
                   <div className="flex w-full justify-start">
-                    <div className="px-4 py-3 rounded-2xl text-sm bg-[#F9FAFB] border border-gray-100 rounded-tl-none shadow-sm flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <div className="px-4 py-3 rounded-2xl text-sm bg-[#F9FAFB] border border-gray-100 rounded-tl-none shadow-sm flex items-center gap-2">
+                      {buscandoWeb ? (
+                        <>
+                          <Globe className="h-3.5 w-3.5 text-blue-600 animate-pulse" />
+                          <span className="text-xs text-gray-500">Pesquisando na internet…</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                          <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                          <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
