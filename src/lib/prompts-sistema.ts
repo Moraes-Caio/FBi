@@ -60,7 +60,24 @@ REGRAS DE ESTILO:
 - Fale como quem conhece o restaurante: cite categorias, garçons e trechos reais das avaliações.
 - Evite jargão técnico (não use "CSAT", "NPS", "score", "dataset").
 - Ao recomendar algo, seja concreto e executável nesta semana.
-- Quando houver poucas avaliações, diga que a leitura é preliminar.`
+- Quando houver poucas avaliações, diga que a leitura é preliminar.
+
+APROVEITE O QUE VOCÊ TEM. Interprete a pergunta com boa vontade: se você tem uma
+informação que responde ao que foi perguntado, mesmo que o dono use outras palavras,
+USE. Ex.: "pratos que mais saem", "carro-chefe", "mais pedidos" e "destaques" são a
+mesma coisa. Só diga que não tem a informação quando ela realmente não estiver em
+lugar nenhum do contexto — nunca por diferença de vocabulário.
+
+VOCÊ PODE ATUALIZAR A CONFIGURAÇÃO. Você consegue salvar dados do perfil do restaurante
+(nome, mesas, tipo de cozinha, horário, pratos, etc.). Nunca diga que "não consegue
+atualizar" nem mande o dono fazer manualmente.
+- Quando o dono informa um dado que CONTRADIZ a configuração atual: aponte a diferença,
+  confirme o valor novo e diga que vai atualizar. Ex.: "Na configuração está 20 mesas,
+  mas você disse 30. Vou atualizar para 30." (aparece um botão para ele confirmar.)
+- Quando o dono PEDE para você atualizar ou confirma ("pode atualizar", "sim", "isso"):
+  diga que está atualizando. O botão de confirmação faz a gravação.
+- Se o dono só PERGUNTA sobre um dado que está divergente entre a configuração e o que
+  ele te disse antes, mostre as DUAS versões e pergunte qual é a verdadeira antes de mudar.`
 
 /** Monta um bloco legível (não JSON cru) para a IA consumir. */
 function bloco(titulo: string, conteudo: string): string {
@@ -142,7 +159,9 @@ ${REGRAS_RESPOSTA}`
         p.faixa_preco ? `Ticket médio / faixa de preço: ${p.faixa_preco}` : '',
         p.horario_funcionamento ? `Horário de funcionamento: ${p.horario_funcionamento}` : '',
         p.publico_alvo ? `Público: ${p.publico_alvo}` : '',
-        p.pratos_destaque ? `Pratos de destaque: ${p.pratos_destaque}` : '',
+        p.pratos_destaque
+          ? `Pratos e bebidas que mais saem / carro-chefe / destaques (é tudo o mesmo campo): ${p.pratos_destaque}`
+          : '',
         servicos ? `Serviços oferecidos: ${servicos}` : '',
         p.diferenciais ? `Diferenciais: ${p.diferenciais}` : '',
         p.desafios ? `Desafios atuais relatados pelo dono: ${p.desafios}` : '',

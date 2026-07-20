@@ -4,6 +4,13 @@ import { enviarMensagem, enviarMensagemComFontes, ChatMessage, FonteWeb } from '
 import { construirSystemPromptChef, MARCADOR_BUSCA, MARCADOR_LEITURA } from '@/lib/prompts-sistema'
 import { memorizarDaConversa, FatoMemoria } from '@/lib/queries/memoria-assistente'
 import { buscarConhecimento, extrairTextoDeUrl as lerPagina } from '@/lib/queries/conhecimento'
+import { CAMPOS_CONFIG, campoValido } from '@/lib/queries/config-update'
+
+export interface AtualizacaoConfig {
+  campo: string
+  valor: string
+  rotulo: string
+}
 
 export interface MensagemChat {
   id?: string
@@ -19,6 +26,7 @@ export interface ResultadoEnvio {
   error?: string
   intent?: 'criar_acao' | 'criar_insight' | null
   suggestedData?: any
+  atualizacaoConfig?: AtualizacaoConfig | null
 }
 
 export function useChat(contextoPagina: string, contextoDadosIniciais: any = {}) {
@@ -58,6 +66,46 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     (texto: string, imageUrl?: string) => aplicar((prev) => [...prev, { role: 'user', text: texto, imageUrl }]),
     [aplicar],
   )
+
+  /**
+   * Detecta se o usuário quer atualizar um dado da configuração — seja informando
+   * um valor novo, seja confirmando um que a IA acabou de propor.
+   */
+  const detectarAtualizacaoConfig = async (
+    textoUsuario: string,
+    ultimaResposta: string,
+    configAtual: Record<string, unknown>,
+  ): Promise<AtualizacaoConfig | null> => {
+    try {
+      const res = await enviarMensagem(
+        [
+          {
+            role: 'system',
+            content: `Você decide se o usuário quer ATUALIZAR um dado da configuração do restaurante.
+
+Campos possíveis (use exatamente estas chaves): ${Object.keys(CAMPOS_CONFIG).join(', ')}.
+
+Configuração atual: ${JSON.stringify(configAtual)}
+Última fala do assistente: "${ultimaResposta}"
+
+Responda { "campo": <chave ou null>, "valor": <novo valor como texto> } apenas quando:
+- o usuário AFIRMA um dado que substitui o atual (ex: "meu nome é Breno", "agora são 30 mesas"), ou
+- o usuário CONFIRMA uma atualização que o assistente propôs (ex: "sim", "pode atualizar", "isso", "vc atualiza").
+Se o usuário só faz uma pergunta, ou não há valor novo claro, responda { "campo": null, "valor": "" }.`,
+          },
+          { role: 'user', content: textoUsuario },
+        ],
+        { response_format: { type: 'json_object' } },
+      )
+      const obj = res as any
+      if (obj?.campo && campoValido(obj.campo) && String(obj.valor || '').trim()) {
+        return { campo: obj.campo, valor: String(obj.valor).trim(), rotulo: CAMPOS_CONFIG[obj.campo] }
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
 
   const detectarIntencao = async (textoUsuario: string) => {
     try {
@@ -284,10 +332,18 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
       let intent: ResultadoEnvio['intent'] = null
       let suggestedData: any = null
+      let atualizacaoConfig: AtualizacaoConfig | null = null
       if (texto) {
-        const deteccao = await detectarIntencao(texto)
+        // As duas detecções rodam em paralelo, em bastidor
+        const [deteccao, atual] = await Promise.all([
+          detectarIntencao(texto),
+          contextoFinal.configAtual
+            ? detectarAtualizacaoConfig(texto, respostaTexto, contextoFinal.configAtual)
+            : Promise.resolve(null),
+        ])
         intent = deteccao.tipo
         suggestedData = deteccao.dadosSugeridos
+        atualizacaoConfig = atual
         if (intent) {
           aplicar((prev) => {
             const copia = [...prev]
@@ -298,7 +354,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
         }
       }
 
-      return { intent, suggestedData }
+      return { intent, suggestedData, atualizacaoConfig }
     } catch (err: any) {
       const msg = err.message || 'Erro ao comunicar com a IA'
       setError(msg)

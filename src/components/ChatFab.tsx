@@ -14,6 +14,7 @@ import {
   X,
   Globe,
   ChevronDown,
+  Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -39,7 +40,8 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { FormattedMessage, parseInline, LINK_ESCURO } from '@/lib/chat-utils'
-import { useChat } from '@/hooks/use-chat'
+import { useChat, AtualizacaoConfig } from '@/hooks/use-chat'
+import { atualizarCampoConfig } from '@/lib/queries/config-update'
 import { buscarMemoria, FatoMemoria } from '@/lib/queries/memoria-assistente'
 import { buscarKpis } from '@/lib/queries/visao-geral'
 import { buscarEstatisticasRelatorio } from '@/lib/queries/relatorios'
@@ -137,7 +139,7 @@ function Fontes({ fontes }: { fontes: { url: string; titulo: string }[] }) {
 export function ChatFab() {
   const { pathname } = useLocation()
   const { user, usuario } = useAuth()
-  const { mascote } = useRestauranteConfig()
+  const { mascote, refetch: refetchConfig } = useRestauranteConfig()
   const mascoteNome = mascote.nome
   // O return condicional fica no fim do componente: sair antes dos hooks
   // muda a quantidade de hooks entre renders e quebra o React.
@@ -170,6 +172,9 @@ export function ChatFab() {
     tipo: 'criar_acao' | 'criar_insight'
     dados: any
   } | null>(null)
+
+  const [pendingConfig, setPendingConfig] = useState<AtualizacaoConfig | null>(null)
+  const [salvandoConfig, setSalvandoConfig] = useState(false)
 
   const [isAcaoOpen, setIsAcaoOpen] = useState(false)
   const [acaoForm, setAcaoForm] = useState({ titulo_acao: '', plano_detalhado: '', prioridade: 'IMPORTANTE' })
@@ -398,7 +403,7 @@ export function ChatFab() {
         rId ? supabase.from('garcons').select('nome_garcon').eq('restaurante_id', rId).eq('ativo', true) : vazio,
         rId
           ? supabase.from('restaurantes')
-              .select('nome_restaurante, detalhes, mascote_config, perfil_restaurante, tipo_culinaria, numero_mesas')
+              .select('nome, nome_restaurante, detalhes, mascote_config, perfil_restaurante, tipo_culinaria, numero_mesas')
               .eq('id', rId).single()
           : Promise.resolve({ data: null as any }),
         buscarKpis(rId, '30d').catch(() => null),
@@ -408,17 +413,32 @@ export function ChatFab() {
 
     memoriaRef.current = memoria
 
+    const cfg = configRes.data as any
+    const perfil = (cfg?.perfil_restaurante as any) || {}
+
     return {
       restaurante_id: rId,
-      restaurante: configRes.data
+      restaurante: cfg
         ? {
-            nome_restaurante: configRes.data.nome_restaurante,
-            detalhes: (configRes.data as any).detalhes,
-            tipo_culinaria: (configRes.data as any).tipo_culinaria,
-            numero_mesas: (configRes.data as any).numero_mesas,
-            perfil: (configRes.data as any).perfil_restaurante || {},
+            nome: cfg.nome,
+            nome_restaurante: cfg.nome_restaurante,
+            detalhes: cfg.detalhes,
+            tipo_culinaria: cfg.tipo_culinaria,
+            numero_mesas: cfg.numero_mesas,
+            perfil,
           }
         : null,
+      // versão achatada, só com o que a IA pode atualizar (para detectar conflito)
+      configAtual: cfg
+        ? {
+            nome: cfg.nome ?? '',
+            nome_restaurante: cfg.nome_restaurante ?? '',
+            tipo_culinaria: cfg.tipo_culinaria ?? '',
+            numero_mesas: cfg.numero_mesas ?? '',
+            detalhes: cfg.detalhes ?? '',
+            ...perfil,
+          }
+        : {},
       usuario: { nome: usuario?.nome ?? null },
       mascote_config: configRes.data?.mascote_config,
       memoria,
@@ -442,6 +462,7 @@ export function ChatFab() {
     setHasError(false)
     setFailedMessage('')
     setPendingAction(null)
+    setPendingConfig(null)
 
     // A mensagem aparece na hora — buscar contexto e chamar a IA vem depois
     adicionarMensagemUsuario(msgTexto, msgImg || undefined)
@@ -457,6 +478,22 @@ export function ChatFab() {
       setFailedMessage(msgTexto)
     } else if (result?.intent) {
       setPendingAction({ tipo: result.intent, dados: result.suggestedData })
+    }
+    if (result?.atualizacaoConfig) setPendingConfig(result.atualizacaoConfig)
+  }
+
+  const confirmarAtualizacaoConfig = async () => {
+    if (!pendingConfig || !usuario?.restaurante_id) return
+    setSalvandoConfig(true)
+    try {
+      await atualizarCampoConfig(usuario.restaurante_id, pendingConfig.campo, pendingConfig.valor)
+      refetchConfig()
+      toast({ title: 'Configuração atualizada', description: `${pendingConfig.rotulo}: ${pendingConfig.valor}` })
+      setPendingConfig(null)
+    } catch (e: any) {
+      toast({ title: 'Erro ao atualizar', description: e.message, variant: 'destructive' })
+    } finally {
+      setSalvandoConfig(false)
     }
   }
 
@@ -731,6 +768,27 @@ export function ChatFab() {
                           >
                             <PlusCircle className="h-3 w-3" />
                             {pendingAction.tipo === 'criar_acao' ? 'Criar Ação' : 'Criar Insight'}
+                          </Button>
+                        </div>
+                      )}
+                      {isLast && msg.role === 'assistant' && pendingConfig && !loading && (
+                        <div className="flex w-full justify-start pl-2 gap-2">
+                          <Button
+                            size="sm"
+                            className="gap-1.5 text-xs h-8 rounded-full bg-[#1D4ED8] hover:bg-blue-800 text-white"
+                            onClick={confirmarAtualizacaoConfig}
+                            disabled={salvandoConfig}
+                          >
+                            {salvandoConfig ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                            Atualizar {pendingConfig.rotulo} para "{pendingConfig.valor}"
+                          </Button>
+                          <Button
+                            size="sm" variant="ghost"
+                            className="text-xs h-8 rounded-full text-gray-500"
+                            onClick={() => setPendingConfig(null)}
+                            disabled={salvandoConfig}
+                          >
+                            Agora não
                           </Button>
                         </div>
                       )}
