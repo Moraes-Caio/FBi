@@ -214,7 +214,7 @@ export function ChatFab() {
   const [failedMessage, setFailedMessage] = useState('')
   // Fluxo do agente
   // Proposta aberta no popup: guarda a ação e de qual mensagem ela veio
-  const [popup, setPopup] = useState<{ acao: AcaoAgente; indice: number } | null>(null)
+  const [popup, setPopup] = useState<{ acao: AcaoAgente; uid: string } | null>(null)
   const [formularioPendente, setFormularioPendente] = useState<(TipoFormulario & { acao_pretendida?: string }) | null>(null)
   // Ações já aplicadas nesta conversa: ficam marcadas abaixo do chat
   const [registrosFeitos, setRegistrosFeitos] = useState<RegistroAcao[]>([])
@@ -396,7 +396,12 @@ export function ChatFab() {
         .eq('usuario_id', user!.id)
 
       setSessoes((prev) => prev.filter((s) => s.id !== id))
-      if (id === sessaoId) handleNovaConversa()
+      // Excluir a conversa aberta não deve jogar o dono para um chat novo:
+      // ele continua no histórico, escolhendo para onde ir.
+      if (id === sessaoId) {
+        novaConversa()
+        setView('history')
+      }
       toast({ title: 'Conversa excluída' })
     } catch {
       toast({ title: 'Erro ao excluir', variant: 'destructive' })
@@ -627,8 +632,8 @@ export function ChatFab() {
       } else {
         // A proposta fica presa à resposta: o botão não some ao continuar a
         // conversa, e dá para reabrir mesmo depois de rolar para cima.
-        const msgs = anexarProposta(result.acao)
-        setPopup({ acao: result.acao, indice: msgs.length - 1 })
+        const uid = anexarProposta(result.acao)
+        if (uid) setPopup({ acao: result.acao, uid })
       }
     }
   }
@@ -638,7 +643,7 @@ export function ChatFab() {
     acao: AcaoAgente,
     modo: 'automatico' | 'confirmado',
     dadosEditados?: Record<string, any>,
-    indiceMensagem?: number,
+    uidMensagem?: string,
   ) => {
     if (!usuario?.restaurante_id) {
       // Antes isto falhava calado e parecia que o botão não fazia nada
@@ -656,7 +661,7 @@ export function ChatFab() {
         setRegistrosFeitos((p) => [...p, registro])
         anexarRegistro({ id: registro.id, descricao: registro.descricao })
       }
-      if (indiceMensagem !== undefined) limparProposta(indiceMensagem)
+      if (uidMensagem) limparProposta(uidMensagem)
       setPopup(null)
       refetchConfig()
       toast({
@@ -720,12 +725,13 @@ export function ChatFab() {
 
   const messagesToRender =
     messages.length === 0
-      ? [{ role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, anexos: undefined, fontes: undefined, registros: undefined, proposta: undefined }]
-      : messages.map((m) => ({ role: m.role, content: m.text, anexos: m.anexos, fontes: m.fontes, registros: m.registros, proposta: m.proposta }))
+      ? [{ uid: 'saudacao', role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, anexos: undefined, fontes: undefined, registros: undefined, proposta: undefined }]
+      : messages.map((m) => ({ uid: m.uid, role: m.role, content: m.text, anexos: m.anexos, fontes: m.fontes, registros: m.registros, proposta: m.proposta }))
 
   return (
     <>
-      <Sheet open={open} onOpenChange={setOpen}>
+      {/* modal={false}: o chat fica aberto sem escurecer nem travar o resto do app */}
+      <Sheet open={open} onOpenChange={setOpen} modal={false}>
         <SheetTrigger asChild>
           <Button
             size="icon"
@@ -736,12 +742,14 @@ export function ChatFab() {
         </SheetTrigger>
 
         <SheetContent
+          semOverlay
           className="w-full sm:max-w-[380px] p-0 flex flex-col h-full border-l shadow-2xl"
           // Sem isto, fechar o popup (Esc ou clique fora) fecha o chat junto:
           // o evento do dialog aninhado borbulha para o Sheet.
           onEscapeKeyDown={(e) => { if (temPopupAberto) e.preventDefault() }}
-          onPointerDownOutside={(e) => { if (temPopupAberto) e.preventDefault() }}
-          onInteractOutside={(e) => { if (temPopupAberto) e.preventDefault() }}
+          // Clicar fora não fecha: o dono continua mexendo no painel com o chat aberto
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
         >
 
           {/* ── Header ── */}
@@ -1000,7 +1008,7 @@ export function ChatFab() {
                             size="sm"
                             variant="outline"
                             className="gap-1.5 text-xs h-8 rounded-full border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
-                            onClick={() => setPopup({ acao: msg.proposta!, indice: i })}
+                            onClick={() => setPopup({ acao: msg.proposta!, uid: msg.uid })}
                           >
                             <Sparkles className="h-3 w-3" />
                             {ROTULO_ACAO[msg.proposta.tipo] || 'Revisar alteração'}
@@ -1191,7 +1199,7 @@ export function ChatFab() {
       {popup && (
         <ConfirmacaoAcao
           acao={popup.acao}
-          onConfirmar={(dados) => aplicarAcao(popup.acao, 'confirmado', dados, popup.indice)}
+          onConfirmar={(dados) => aplicarAcao(popup.acao, 'confirmado', dados, popup.uid)}
           onCancelar={() => setPopup(null)}
         />
       )}

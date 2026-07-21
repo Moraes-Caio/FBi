@@ -25,6 +25,10 @@ export interface AnexoMensagem {
 
 export interface MensagemChat {
   id?: string
+  /** Identificador local e estável — não muda se a lista for reordenada ou
+   *  recarregada. A posição no array (índice) mudaria e apontaria para a
+   *  mensagem errada. */
+  uid: string
   role: 'user' | 'assistant'
   text: string
   /** Anexos da mensagem (imagens, PDFs e textos) */
@@ -77,9 +81,11 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
    * Coloca a mensagem do usuário na tela IMEDIATAMENTE, antes de qualquer
    * chamada de rede. Devolve o histórico já com ela para o envio usar.
    */
+  const novoUid = () => `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
   const adicionarMensagemUsuario = useCallback(
     (texto: string, anexos?: AnexoMensagem[]) =>
-      aplicar((prev) => [...prev, { role: 'user', text: texto, anexos }]),
+      aplicar((prev) => [...prev, { uid: novoUid(), role: 'user', text: texto, anexos }]),
     [aplicar],
   )
 
@@ -259,6 +265,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
         aplicar(() =>
           data.map((m) => ({
             id: m.id,
+            uid: m.id,
             role: m.papel === 'usuario' ? ('user' as const) : ('assistant' as const),
             text: m.mensagem,
             // anexos ficam em contexto_dados (o schema de mensagens_chat não muda);
@@ -417,7 +424,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
       // Mostra a resposta assim que chega e JÁ desliga o "digitando":
       // o que vem depois (gravar histórico, memória, intenção) é trabalho de
       // bastidor e não deve deixar o indicador aceso.
-      aplicar((prev) => [...prev, { role: 'assistant', text: respostaTexto, fontes }])
+      aplicar((prev) => [...prev, { uid: novoUid(), role: 'assistant', text: respostaTexto, fontes }])
       setLoading(false) // enviandoRef segue travado até gravar, para nada sobrescrever
 
       const { data: { user } } = await supabase.auth.getUser()
@@ -493,24 +500,27 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
   /** Prende a proposta à última resposta da IA (o botão vive com a mensagem). */
   const anexarProposta = useCallback(
-    (proposta: AcaoAgente | null) =>
+    (proposta: AcaoAgente | null): string | null => {
+      let alvo: string | null = null
       aplicar((prev) => {
         const copia = [...prev]
         for (let i = copia.length - 1; i >= 0; i--) {
           if (copia[i].role === 'assistant') {
+            alvo = copia[i].uid
             copia[i] = { ...copia[i], proposta }
             break
           }
         }
         return copia
-      }),
+      })
+      return alvo
+    },
     [aplicar],
   )
 
   /** Tira a proposta de uma mensagem (já aplicada ou descartada). */
   const limparProposta = useCallback(
-    (indice: number) =>
-      aplicar((prev) => prev.map((m, i) => (i === indice ? { ...m, proposta: null } : m))),
+    (uid: string) => aplicar((prev) => prev.map((m) => (m.uid === uid ? { ...m, proposta: null } : m))),
     [aplicar],
   )
 
