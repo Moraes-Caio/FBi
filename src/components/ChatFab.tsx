@@ -15,6 +15,7 @@ import {
   Globe,
   ChevronDown,
   Check,
+  FileText,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -42,6 +43,7 @@ import { cn } from '@/lib/utils'
 import { FormattedMessage, parseInline, LINK_ESCURO } from '@/lib/chat-utils'
 import { useChat, AtualizacaoConfig } from '@/hooks/use-chat'
 import { atualizarCampoConfig } from '@/lib/queries/config-update'
+import { extrairTextoDePdf } from '@/lib/queries/conhecimento'
 import { buscarMemoria, FatoMemoria } from '@/lib/queries/memoria-assistente'
 import { buscarKpis } from '@/lib/queries/visao-geral'
 import { buscarEstatisticasRelatorio } from '@/lib/queries/relatorios'
@@ -147,7 +149,7 @@ export function ChatFab() {
   const { toast } = useToast()
   const {
     messages, loading, buscandoWeb, sessaoId, enviar, adicionarMensagemUsuario,
-    carregarHistorico, novaConversa, mudarSessao,
+    removerUltimaMensagem, carregarHistorico, novaConversa, mudarSessao,
   } = useChat('global')
 
   const [open, setOpen] = useState(false)
@@ -161,6 +163,8 @@ export function ChatFab() {
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [imagemUrl, setImagemUrl] = useState<string | null>(null) // URL pública já hospedada
   const [enviandoImagem, setEnviandoImagem] = useState(false)
+  // Documento (PDF/texto) anexado: vai como contexto, nunca como imagem
+  const [arquivo, setArquivo] = useState<{ nome: string; texto: string } | null>(null)
   const memoriaRef = useRef<FatoMemoria[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -345,23 +349,62 @@ export function ChatFab() {
 
   // ── Image upload ───────────────────────────────────────────────────────────
 
+  const TEXTO_ACEITO = ['text/plain', 'text/markdown', 'text/csv', 'application/json']
+
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: 'Imagem muito grande', description: 'Máximo 5 MB', variant: 'destructive' })
+
+    const ehImagem = file.type.startsWith('image/')
+    const ehPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+    const ehTexto = TEXTO_ACEITO.includes(file.type) || /\.(txt|md|csv|json)$/i.test(file.name)
+
+    // Antes, qualquer arquivo era enviado como imagem para a IA e ela quebrava
+    if (!ehImagem && !ehPdf && !ehTexto) {
+      toast({
+        title: 'Tipo de arquivo não suportado',
+        description: 'Envie uma imagem, um PDF ou um arquivo de texto (.txt, .md, .csv).',
+        variant: 'destructive',
+      })
       return
     }
 
-    // Preview local imediato; o upload acontece por trás
+    const limite = ehImagem ? 5 : 15
+    if (file.size > limite * 1024 * 1024) {
+      toast({ title: 'Arquivo muito grande', description: `Máximo ${limite} MB`, variant: 'destructive' })
+      return
+    }
+
+    // ── Documento: o texto é extraído aqui e vai como contexto, não como imagem
+    if (ehPdf || ehTexto) {
+      setEnviandoImagem(true)
+      try {
+        const conteudo = ehPdf ? await extrairTextoDePdf(file) : await file.text()
+        if (conteudo.trim().length < 20) {
+          throw new Error('Não consegui ler texto deste arquivo. Se for um PDF digitalizado, o texto precisa ser selecionável.')
+        }
+        setArquivo({ nome: file.name, texto: conteudo })
+        toast({ title: 'Arquivo anexado', description: file.name })
+      } catch (err: any) {
+        toast({ title: 'Não consegui ler o arquivo', description: err.message, variant: 'destructive' })
+      } finally {
+        setEnviandoImagem(false)
+      }
+      return
+    }
+
+    // ── Imagem: preview local imediato; o upload acontece por trás
     const objetoUrl = URL.createObjectURL(file)
     setImagePreview(objetoUrl)
     setEnviandoImagem(true)
     try {
       const ext = file.name.split('.').pop() || 'jpg'
       const caminho = `${user?.id ?? 'anon'}/${Date.now()}.${ext}`
-      const { error } = await supabase.storage.from('chat-imagens').upload(caminho, file, { upsert: true })
+      const { error } = await supabase.storage.from('chat-imagens').upload(caminho, file, {
+        upsert: true,
+        contentType: file.type,
+      })
       if (error) throw error
       const { data: { publicUrl } } = supabase.storage.from('chat-imagens').getPublicUrl(caminho)
       setImagemUrl(publicUrl)
@@ -454,11 +497,13 @@ export function ChatFab() {
   const handleSend = async (text: string, img?: string | null) => {
     const msgTexto = text.trim()
     const msgImg = img !== undefined ? img : imagemUrl
-    if ((!msgTexto && !msgImg) || loading || enviandoImagem) return
+    if ((!msgTexto && !msgImg && !arquivo) || loading || enviandoImagem) return
 
+    const anexo = arquivo
     setMessage('')
     setImagePreview(null)
     setImagemUrl(null)
+    setArquivo(null)
     setHasError(false)
     setFailedMessage('')
     setPendingAction(null)
@@ -468,6 +513,7 @@ export function ChatFab() {
     adicionarMensagemUsuario(msgTexto, msgImg || undefined)
 
     const contexto = await fetchContexto()
+    if (anexo) contexto.arquivo = anexo
     const result = await enviar(msgTexto, contexto, undefined, msgImg || undefined, {
       jaExibida: true,
       memoria: memoriaRef.current,
@@ -476,6 +522,9 @@ export function ChatFab() {
     if (result?.error) {
       setHasError(true)
       setFailedMessage(msgTexto)
+      // Remove a mensagem que falhou: se ela ficar no historico (ex: com um
+      // anexo invalido), toda mensagem seguinte a reenvia e falha tambem.
+      removerUltimaMensagem()
     } else if (result?.intent) {
       setPendingAction({ tipo: result.intent, dados: result.suggestedData })
     }
@@ -844,6 +893,19 @@ export function ChatFab() {
                 </div>
 
                 {/* Preview de imagem */}
+                {arquivo && (
+                  <div className="flex items-center gap-2 w-fit max-w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                    <FileText className="h-4 w-4 text-primary shrink-0" />
+                    <span className="text-xs text-gray-700 truncate">{arquivo.nome}</span>
+                    <button
+                      onClick={() => setArquivo(null)}
+                      className="h-4 w-4 shrink-0 rounded-full bg-gray-300 text-white flex items-center justify-center hover:bg-gray-500"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                )}
+
                 {imagePreview && (
                   <div className="relative w-fit">
                     <img src={imagePreview} alt="preview" className="h-20 w-20 object-cover rounded-lg border border-gray-200" />
@@ -866,7 +928,7 @@ export function ChatFab() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/*,application/pdf,.txt,.md,.csv,.json"
                     className="hidden"
                     onChange={handleImageSelect}
                   />
@@ -895,7 +957,7 @@ export function ChatFab() {
                     size="icon"
                     className="absolute right-2 bottom-2 h-8 w-8 bg-[#1D4ED8] hover:bg-blue-800 text-white rounded-lg disabled:opacity-50"
                     onClick={() => handleSend(message)}
-                    disabled={(!message.trim() && !imagemUrl) || loading || enviandoImagem}
+                    disabled={(!message.trim() && !imagemUrl && !arquivo) || loading || enviandoImagem}
                   >
                     <Send className="h-4 w-4" />
                   </Button>

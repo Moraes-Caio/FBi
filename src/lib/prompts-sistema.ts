@@ -180,6 +180,14 @@ ${REGRAS_RESPOSTA}`
     prompt += bloco('Com quem você está falando', `${ctx.usuario.nome}, responsável pelo restaurante.`)
   }
 
+  // Arquivo que o dono anexou nesta mensagem (PDF ou texto)
+  if (ctx.arquivo?.texto) {
+    prompt += bloco(
+      `Arquivo enviado agora pelo dono: "${ctx.arquivo.nome}"`,
+      `${String(ctx.arquivo.texto).slice(0, 15000)}\n\nEste é o conteúdo do arquivo que ele acabou de anexar. Responda ao que ele pediu sobre este arquivo.`,
+    )
+  }
+
   // Trechos recuperados dos documentos de treinamento (busca vetorial)
   if (ctx.conhecimento?.length) {
     prompt += bloco(
