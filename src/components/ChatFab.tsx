@@ -16,6 +16,7 @@ import {
   ChevronDown,
   Check,
   FileText,
+  Undo2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -41,8 +42,14 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { FormattedMessage, parseInline, LINK_ESCURO } from '@/lib/chat-utils'
-import { useChat, AtualizacaoConfig } from '@/hooks/use-chat'
-import { atualizarCampoConfig } from '@/lib/queries/config-update'
+import { useChat, AnexoMensagem } from '@/hooks/use-chat'
+import {
+  AcaoAgente, FormularioIA as TipoFormulario, RegistroAcao,
+  ACOES_DESTRUTIVAS, executarAcao, reverterAcao,
+} from '@/lib/queries/agente-ia'
+import { ConfirmacaoAcao } from '@/components/chat/ConfirmacaoAcao'
+import { FormularioIA } from '@/components/chat/FormularioIA'
+import { VisualizadorAnexo, AnexoVisivel } from '@/components/chat/VisualizadorAnexo'
 import { extrairTextoDePdf } from '@/lib/queries/conhecimento'
 import { buscarMemoria, FatoMemoria } from '@/lib/queries/memoria-assistente'
 import { buscarKpis } from '@/lib/queries/visao-geral'
@@ -91,6 +98,18 @@ function toggleFixada(id: string): boolean {
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
+
+interface AnexoPendente {
+  id: string
+  nome: string
+  tipo: 'imagem' | 'pdf' | 'texto'
+  /** URL pública (imagem e PDF) — usada para exibir e para a IA ver a imagem */
+  url?: string
+  /** Texto extraído (PDF e arquivos de texto) — vai como contexto da conversa */
+  texto?: string
+  previewLocal?: string
+  enviando: boolean
+}
 
 interface SessaoItem {
   id: string
@@ -160,11 +179,10 @@ export function ChatFab() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const [imagemUrl, setImagemUrl] = useState<string | null>(null) // URL pública já hospedada
+  // Vários anexos por mensagem, de tipos misturados
+  const [anexos, setAnexos] = useState<AnexoPendente[]>([])
   const [enviandoImagem, setEnviandoImagem] = useState(false)
-  // Documento (PDF/texto) anexado: vai como contexto, nunca como imagem
-  const [arquivo, setArquivo] = useState<{ nome: string; texto: string } | null>(null)
+  const [anexoAberto, setAnexoAberto] = useState<AnexoVisivel | null>(null)
   const memoriaRef = useRef<FatoMemoria[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -177,13 +195,11 @@ export function ChatFab() {
     dados: any
   } | null>(null)
 
-  const [pendingConfig, setPendingConfig] = useState<AtualizacaoConfig | null>(null)
-  const [salvandoConfig, setSalvandoConfig] = useState(false)
-
-  const [isAcaoOpen, setIsAcaoOpen] = useState(false)
-  const [acaoForm, setAcaoForm] = useState({ titulo_acao: '', plano_detalhado: '', prioridade: 'IMPORTANTE' })
-  const [isInsightOpen, setIsInsightOpen] = useState(false)
-  const [insightForm, setInsightForm] = useState({ titulo: '', descricao: '', prioridade: 'OBSERVACAO' })
+  // Fluxo do agente
+  const [acaoPendente, setAcaoPendente] = useState<AcaoAgente | null>(null)
+  const [formularioPendente, setFormularioPendente] = useState<(TipoFormulario & { acao_pretendida?: string }) | null>(null)
+  const [ultimoRegistro, setUltimoRegistro] = useState<RegistroAcao | null>(null)
+  const [modoAcao, setModoAcao] = useState<'perguntar' | 'automatico'>('perguntar')
 
   useEffect(() => {
     if (open && user) carregarHistorico(sessaoId)
@@ -350,74 +366,93 @@ export function ChatFab() {
   // ── Image upload ───────────────────────────────────────────────────────────
 
   const TEXTO_ACEITO = ['text/plain', 'text/markdown', 'text/csv', 'application/json']
+  const ACCEPT = 'image/*,application/pdf,.txt,.md,.csv,.json'
 
-  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-
-    const ehImagem = file.type.startsWith('image/')
-    const ehPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
-    const ehTexto = TEXTO_ACEITO.includes(file.type) || /\.(txt|md|csv|json)$/i.test(file.name)
-
-    // Antes, qualquer arquivo era enviado como imagem para a IA e ela quebrava
-    if (!ehImagem && !ehPdf && !ehTexto) {
-      toast({
-        title: 'Tipo de arquivo não suportado',
-        description: 'Envie uma imagem, um PDF ou um arquivo de texto (.txt, .md, .csv).',
-        variant: 'destructive',
-      })
-      return
-    }
-
-    const limite = ehImagem ? 5 : 15
-    if (file.size > limite * 1024 * 1024) {
-      toast({ title: 'Arquivo muito grande', description: `Máximo ${limite} MB`, variant: 'destructive' })
-      return
-    }
-
-    // ── Documento: o texto é extraído aqui e vai como contexto, não como imagem
-    if (ehPdf || ehTexto) {
-      setEnviandoImagem(true)
-      try {
-        const conteudo = ehPdf ? await extrairTextoDePdf(file) : await file.text()
-        if (conteudo.trim().length < 20) {
-          throw new Error('Não consegui ler texto deste arquivo. Se for um PDF digitalizado, o texto precisa ser selecionável.')
-        }
-        setArquivo({ nome: file.name, texto: conteudo })
-        toast({ title: 'Arquivo anexado', description: file.name })
-      } catch (err: any) {
-        toast({ title: 'Não consegui ler o arquivo', description: err.message, variant: 'destructive' })
-      } finally {
-        setEnviandoImagem(false)
-      }
-      return
-    }
-
-    // ── Imagem: preview local imediato; o upload acontece por trás
-    const objetoUrl = URL.createObjectURL(file)
-    setImagePreview(objetoUrl)
-    setEnviandoImagem(true)
-    try {
-      const ext = file.name.split('.').pop() || 'jpg'
-      const caminho = `${user?.id ?? 'anon'}/${Date.now()}.${ext}`
-      const { error } = await supabase.storage.from('chat-imagens').upload(caminho, file, {
-        upsert: true,
-        contentType: file.type,
-      })
-      if (error) throw error
-      const { data: { publicUrl } } = supabase.storage.from('chat-imagens').getPublicUrl(caminho)
-      setImagemUrl(publicUrl)
-    } catch (err: any) {
-      toast({ title: 'Erro ao enviar imagem', description: err.message, variant: 'destructive' })
-      setImagePreview(null)
-      URL.revokeObjectURL(objetoUrl)
-    } finally {
-      setEnviandoImagem(false)
-    }
+  /** Envia um arquivo ao bucket e devolve a URL pública. */
+  const subirArquivo = async (file: File) => {
+    const ext = file.name.split('.').pop() || 'bin'
+    const caminho = `${user?.id ?? 'anon'}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
+    const { error } = await supabase.storage
+      .from('chat-imagens')
+      .upload(caminho, file, { upsert: true, contentType: file.type || undefined })
+    if (error) throw error
+    return supabase.storage.from('chat-imagens').getPublicUrl(caminho).data.publicUrl
   }
 
-  // ── Send ───────────────────────────────────────────────────────────────────
+  /** Aceita vários arquivos de uma vez, de tipos misturados. */
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const arquivos = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (!arquivos.length) return
+
+    setEnviandoImagem(true)
+    for (const file of arquivos) {
+      const ehImagem = file.type.startsWith('image/')
+      const ehPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+      const ehTexto = TEXTO_ACEITO.includes(file.type) || /\.(txt|md|csv|json)$/i.test(file.name)
+
+      if (!ehImagem && !ehPdf && !ehTexto) {
+        toast({
+          title: `"${file.name}" não é suportado`,
+          description: 'Envie imagem, PDF ou arquivo de texto (.txt, .md, .csv, .json).',
+          variant: 'destructive',
+        })
+        continue
+      }
+
+      const limite = ehImagem ? 5 : 15
+      if (file.size > limite * 1024 * 1024) {
+        toast({ title: `"${file.name}" é muito grande`, description: `Máximo ${limite} MB`, variant: 'destructive' })
+        continue
+      }
+
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const tipo: AnexoPendente['tipo'] = ehImagem ? 'imagem' : ehPdf ? 'pdf' : 'texto'
+      const previewLocal = ehImagem ? URL.createObjectURL(file) : undefined
+
+      setAnexos((p) => [...p, { id, nome: file.name, tipo, previewLocal, enviando: true }])
+
+      try {
+        let url: string | undefined
+        let texto: string | undefined
+
+        if (ehImagem) {
+          url = await subirArquivo(file)
+        } else if (ehPdf) {
+          // sobe para poder visualizar no chat e extrai o texto para a IA
+          ;[url, texto] = await Promise.all([subirArquivo(file), extrairTextoDePdf(file)])
+          if (!texto || texto.trim().length < 20) {
+            texto = ''
+            toast({
+              title: `Não consegui ler o texto de "${file.name}"`,
+              description: 'Você ainda pode visualizá-lo, mas se for digitalizado a IA não lê o conteúdo.',
+            })
+          }
+        } else {
+          texto = await file.text()
+        }
+
+        setAnexos((p) => p.map((a) => (a.id === id ? { ...a, url, texto, enviando: false } : a)))
+      } catch (err: any) {
+        toast({ title: `Erro em "${file.name}"`, description: err.message, variant: 'destructive' })
+        setAnexos((p) => p.filter((a) => a.id !== id))
+      }
+    }
+    setEnviandoImagem(false)
+  }
+
+  const removerAnexo = (id: string) =>
+    setAnexos((p) => {
+      const alvo = p.find((a) => a.id === id)
+      if (alvo?.previewLocal) URL.revokeObjectURL(alvo.previewLocal)
+      return p.filter((a) => a.id !== id)
+    })
+
+  const abrirAnexo = (a: { nome: string; tipo: string; url?: string; texto?: string }) => {
+    if (a.tipo === 'texto' && !a.texto) return
+    if (a.tipo !== 'texto' && !a.url) return
+    setAnexoAberto({ nome: a.nome, tipo: a.tipo as AnexoVisivel['tipo'], url: a.url, texto: a.texto })
+  }
 
   /** Reúne, de forma organizada, tudo que a IA precisa saber para responder. */
   const fetchContexto = async () => {
@@ -446,7 +481,7 @@ export function ChatFab() {
         rId ? supabase.from('garcons').select('nome_garcon').eq('restaurante_id', rId).eq('ativo', true) : vazio,
         rId
           ? supabase.from('restaurantes')
-              .select('nome, nome_restaurante, detalhes, mascote_config, perfil_restaurante, tipo_culinaria, numero_mesas')
+              .select('nome, nome_restaurante, detalhes, mascote_config, perfil_restaurante, tipo_culinaria, numero_mesas, ia_modo_acao')
               .eq('id', rId).single()
           : Promise.resolve({ data: null as any }),
         buscarKpis(rId, '30d').catch(() => null),
@@ -455,6 +490,9 @@ export function ChatFab() {
       ])
 
     memoriaRef.current = memoria
+    if ((configRes.data as any)?.ia_modo_acao) {
+      setModoAcao((configRes.data as any).ia_modo_acao === 'automatico' ? 'automatico' : 'perguntar')
+    }
 
     const cfg = configRes.data as any
     const perfil = (cfg?.perfil_restaurante as any) || {}
@@ -494,27 +532,31 @@ export function ChatFab() {
     }
   }
 
-  const handleSend = async (text: string, img?: string | null) => {
+  const handleSend = async (text: string) => {
     const msgTexto = text.trim()
-    const msgImg = img !== undefined ? img : imagemUrl
-    if ((!msgTexto && !msgImg && !arquivo) || loading || enviandoImagem) return
+    if ((!msgTexto && !anexos.length) || loading || enviandoImagem) return
 
-    const anexo = arquivo
+    const anexosMsg: AnexoMensagem[] = anexos.map((a) => ({
+      nome: a.nome, tipo: a.tipo, url: a.url, texto: a.texto,
+    }))
+    // Documentos vão como texto no contexto; imagens vão como imagem
+    const documentos = anexosMsg.filter((a) => a.tipo !== 'imagem' && a.texto)
+
     setMessage('')
-    setImagePreview(null)
-    setImagemUrl(null)
-    setArquivo(null)
+    setAnexos([])
     setHasError(false)
     setFailedMessage('')
-    setPendingAction(null)
-    setPendingConfig(null)
+    setAcaoPendente(null)
+    setFormularioPendente(null)
+    setUltimoRegistro(null)
 
     // A mensagem aparece na hora — buscar contexto e chamar a IA vem depois
-    adicionarMensagemUsuario(msgTexto, msgImg || undefined)
+    adicionarMensagemUsuario(msgTexto, anexosMsg.length ? anexosMsg : undefined)
 
     const contexto = await fetchContexto()
-    if (anexo) contexto.arquivo = anexo
-    const result = await enviar(msgTexto, contexto, undefined, msgImg || undefined, {
+    if (documentos.length) contexto.arquivos = documentos
+
+    const result = await enviar(msgTexto, contexto, undefined, anexosMsg, {
       jaExibida: true,
       memoria: memoriaRef.current,
     })
@@ -522,94 +564,73 @@ export function ChatFab() {
     if (result?.error) {
       setHasError(true)
       setFailedMessage(msgTexto)
-      // Remove a mensagem que falhou: se ela ficar no historico (ex: com um
-      // anexo invalido), toda mensagem seguinte a reenvia e falha tambem.
+      // Remove a mensagem que falhou: se ela ficar no histórico (ex: com um
+      // anexo inválido), toda mensagem seguinte a reenvia e falha também.
       removerUltimaMensagem()
-    } else if (result?.intent) {
-      setPendingAction({ tipo: result.intent, dados: result.suggestedData })
+      return
     }
-    if (result?.atualizacaoConfig) setPendingConfig(result.atualizacaoConfig)
+
+    if (result?.formulario) {
+      setFormularioPendente(result.formulario)
+    } else if (result?.acao) {
+      // Excluir nunca roda sozinho, nem no modo automático
+      const destrutiva = ACOES_DESTRUTIVAS.includes(result.acao.tipo)
+      if (modoAcao === 'automatico' && !destrutiva) {
+        await aplicarAcao(result.acao, 'automatico')
+      } else {
+        setAcaoPendente(result.acao)
+      }
+    }
   }
 
-  const confirmarAtualizacaoConfig = async () => {
-    if (!pendingConfig || !usuario?.restaurante_id) return
-    setSalvandoConfig(true)
+  /** Executa a alteração e guarda o registro para permitir desfazer. */
+  const aplicarAcao = async (acao: AcaoAgente, modo: 'automatico' | 'confirmado') => {
+    if (!usuario?.restaurante_id) return
     try {
-      await atualizarCampoConfig(usuario.restaurante_id, pendingConfig.campo, pendingConfig.valor)
+      const registro = await executarAcao(usuario.restaurante_id, acao, modo)
+      setUltimoRegistro(registro)
+      setAcaoPendente(null)
       refetchConfig()
-      toast({ title: 'Configuração atualizada', description: `${pendingConfig.rotulo}: ${pendingConfig.valor}` })
-      setPendingConfig(null)
+      toast({
+        title: modo === 'automatico' ? 'Feito pela IA' : 'Alteração aplicada',
+        description: acao.descricao,
+      })
     } catch (e: any) {
-      toast({ title: 'Erro ao atualizar', description: e.message, variant: 'destructive' })
-    } finally {
-      setSalvandoConfig(false)
+      toast({ title: 'Não consegui aplicar', description: e.message, variant: 'destructive' })
+      setAcaoPendente(null)
     }
   }
 
-  // ── Action modals ──────────────────────────────────────────────────────────
-
-  const handleCriarAcao = async () => {
+  const desfazer = async () => {
+    if (!ultimoRegistro) return
     try {
-      const { error } = await supabase.from('acoes_operacionais').insert({
-        titulo_acao: acaoForm.titulo_acao,
-        plano_detalhado: acaoForm.plano_detalhado,
-        prioridade: acaoForm.prioridade,
-        status: 'PENDENTE',
-      })
-      if (error) throw error
-      toast({ title: 'Ação criada!' })
-      setIsAcaoOpen(false)
-      setPendingAction(null)
-    } catch (err: any) {
-      toast({ title: 'Erro', description: err.message, variant: 'destructive' })
+      await reverterAcao(ultimoRegistro)
+      setUltimoRegistro(null)
+      refetchConfig()
+      toast({ title: 'Desfeito', description: 'O valor anterior foi restaurado.' })
+    } catch (e: any) {
+      toast({ title: 'Não consegui desfazer', description: e.message, variant: 'destructive' })
     }
   }
 
-  const handleCriarInsight = async () => {
-    try {
-      const { error } = await supabase.from('insights').insert({
-        restaurante_id: usuario?.restaurante_id,
-        titulo: insightForm.titulo,
-        descricao: insightForm.descricao,
-        prioridade: insightForm.prioridade,
-        gerado_por: 'manual',
-        ativo: true,
-      })
-      if (error) throw error
-      toast({ title: 'Insight criado!' })
-      setIsInsightOpen(false)
-      setPendingAction(null)
-    } catch (err: any) {
-      toast({ title: 'Erro', description: err.message, variant: 'destructive' })
-    }
+  /** Respostas do formulário voltam como mensagem, para a IA agir com os dados. */
+  const responderFormulario = (respostas: Record<string, string>) => {
+    const form = formularioPendente
+    setFormularioPendente(null)
+    if (!form) return
+    const resumo = form.campos
+      .map((c) => (respostas[c.nome] ? `${c.label}: ${respostas[c.nome]}` : ''))
+      .filter(Boolean)
+      .join('; ')
+    if (resumo) handleSend(resumo)
   }
-
-  const openActionModal = () => {
-    if (pendingAction?.tipo === 'criar_acao') {
-      setAcaoForm({
-        titulo_acao: pendingAction.dados?.titulo_acao || pendingAction.dados?.titulo || '',
-        plano_detalhado: pendingAction.dados?.plano_detalhado || pendingAction.dados?.descricao || '',
-        prioridade: pendingAction.dados?.prioridade || 'IMPORTANTE',
-      })
-      setIsAcaoOpen(true)
-    } else if (pendingAction) {
-      setInsightForm({
-        titulo: pendingAction.dados?.titulo || '',
-        descricao: pendingAction.dados?.descricao || '',
-        prioridade: pendingAction.dados?.prioridade || 'OBSERVACAO',
-      })
-      setIsInsightOpen(true)
-    }
-  }
-
-  // ── Render ─────────────────────────────────────────────────────────────────
 
   if (ocultar) return null
 
   const messagesToRender =
     messages.length === 0
-      ? [{ role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, imageUrl: undefined, fontes: undefined }]
-      : messages.map((m) => ({ role: m.role, content: m.text, imageUrl: m.imageUrl, fontes: m.fontes }))
+      ? [{ role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, anexos: undefined, fontes: undefined }]
+      : messages.map((m) => ({ role: m.role, content: m.text, anexos: m.anexos, fontes: m.fontes }))
 
   return (
     <>
@@ -669,7 +690,7 @@ export function ChatFab() {
           </SheetHeader>
 
           {/* ── History view ── */}
-          {view === 'history' && (
+          {!anexoAberto && view === 'history' && (
             <div className="flex-1 overflow-y-auto bg-gray-50">
               {loadingSessoes ? (
                 <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">Carregando...</div>
@@ -773,7 +794,11 @@ export function ChatFab() {
           )}
 
           {/* ── Chat view ── */}
-          {view === 'chat' && (
+          {anexoAberto ? (
+            <VisualizadorAnexo anexo={anexoAberto} onVoltar={() => setAnexoAberto(null)} />
+          ) : null}
+
+          {!anexoAberto && view === 'chat' && (
             <>
               <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-white">
                 {messagesToRender.map((msg, i) => {
@@ -790,12 +815,35 @@ export function ChatFab() {
                               : 'bg-[#F9FAFB] text-[#1F2937] border border-gray-100 rounded-tl-none',
                           )}
                         >
-                          {msg.imageUrl && (
-                            <img
-                              src={msg.imageUrl}
-                              alt="imagem enviada"
-                              className="max-w-[200px] max-h-[180px] object-cover rounded-lg mb-2"
-                            />
+                          {!!msg.anexos?.length && (
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                              {msg.anexos.map((a, ai) =>
+                                a.tipo === 'imagem' ? (
+                                  <button key={ai} onClick={() => abrirAnexo(a)} className="block">
+                                    <img
+                                      src={a.url}
+                                      alt={a.nome}
+                                      className="max-w-[170px] max-h-[150px] object-cover rounded-lg hover:opacity-90 transition"
+                                    />
+                                  </button>
+                                ) : (
+                                  <button
+                                    key={ai}
+                                    onClick={() => abrirAnexo(a)}
+                                    className={cn(
+                                      'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 max-w-[190px] transition',
+                                      msg.role === 'user'
+                                        ? 'bg-white/15 hover:bg-white/25'
+                                        : 'bg-gray-100 hover:bg-gray-200',
+                                    )}
+                                    title={a.nome}
+                                  >
+                                    <FileText className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="text-[11px] truncate">{a.nome}</span>
+                                  </button>
+                                ),
+                              )}
+                            </div>
                           )}
                           {msg.role === 'user' ? (
                             <span className="whitespace-pre-wrap">
@@ -807,37 +855,17 @@ export function ChatFab() {
                           {!!msg.fontes?.length && <Fontes fontes={msg.fontes} />}
                         </div>
                       </div>
-                      {isLast && msg.role === 'assistant' && pendingAction && !loading && (
-                        <div className="flex w-full justify-start pl-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-2 text-xs h-8 rounded-full border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
-                            onClick={openActionModal}
-                          >
-                            <PlusCircle className="h-3 w-3" />
-                            {pendingAction.tipo === 'criar_acao' ? 'Criar Ação' : 'Criar Insight'}
-                          </Button>
-                        </div>
-                      )}
-                      {isLast && msg.role === 'assistant' && pendingConfig && !loading && (
-                        <div className="flex w-full justify-start pl-2 gap-2">
-                          <Button
-                            size="sm"
-                            className="gap-1.5 text-xs h-8 rounded-full bg-[#1D4ED8] hover:bg-blue-800 text-white"
-                            onClick={confirmarAtualizacaoConfig}
-                            disabled={salvandoConfig}
-                          >
-                            {salvandoConfig ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                            Atualizar {pendingConfig.rotulo} para "{pendingConfig.valor}"
-                          </Button>
+                      {isLast && msg.role === 'assistant' && ultimoRegistro && !loading && (
+                        <div className="flex w-full justify-start pl-2 items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-1">
+                            <Check className="h-3 w-3" /> {ultimoRegistro.descricao}
+                          </span>
                           <Button
                             size="sm" variant="ghost"
-                            className="text-xs h-8 rounded-full text-gray-500"
-                            onClick={() => setPendingConfig(null)}
-                            disabled={salvandoConfig}
+                            className="text-[11px] h-7 rounded-full text-gray-500 hover:text-gray-800"
+                            onClick={desfazer}
                           >
-                            Agora não
+                            <Undo2 className="h-3 w-3 mr-1" /> Desfazer
                           </Button>
                         </div>
                       )}
@@ -893,33 +921,40 @@ export function ChatFab() {
                 </div>
 
                 {/* Preview de imagem */}
-                {arquivo && (
-                  <div className="flex items-center gap-2 w-fit max-w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                    <FileText className="h-4 w-4 text-primary shrink-0" />
-                    <span className="text-xs text-gray-700 truncate">{arquivo.nome}</span>
-                    <button
-                      onClick={() => setArquivo(null)}
-                      className="h-4 w-4 shrink-0 rounded-full bg-gray-300 text-white flex items-center justify-center hover:bg-gray-500"
-                    >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </div>
-                )}
-
-                {imagePreview && (
-                  <div className="relative w-fit">
-                    <img src={imagePreview} alt="preview" className="h-20 w-20 object-cover rounded-lg border border-gray-200" />
-                    {enviandoImagem && (
-                      <div className="absolute inset-0 bg-black/45 rounded-lg flex items-center justify-center">
-                        <RefreshCw className="h-4 w-4 text-white animate-spin" />
+                {anexos.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {anexos.map((a) => (
+                      <div key={a.id} className="relative group">
+                        {a.tipo === 'imagem' ? (
+                          <button
+                            onClick={() => abrirAnexo(a)}
+                            className="block h-16 w-16 rounded-lg border border-gray-200 overflow-hidden"
+                          >
+                            <img src={a.url || a.previewLocal} alt={a.nome} className="h-full w-full object-cover" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => abrirAnexo(a)}
+                            className="flex items-center gap-2 h-16 max-w-[190px] rounded-lg border border-gray-200 bg-gray-50 px-3 hover:bg-gray-100"
+                            title={a.nome}
+                          >
+                            <FileText className="h-4 w-4 text-primary shrink-0" />
+                            <span className="text-[11px] text-gray-700 truncate text-left">{a.nome}</span>
+                          </button>
+                        )}
+                        {a.enviando && (
+                          <div className="absolute inset-0 bg-black/45 rounded-lg flex items-center justify-center">
+                            <RefreshCw className="h-4 w-4 text-white animate-spin" />
+                          </div>
+                        )}
+                        <button
+                          onClick={() => removerAnexo(a.id)}
+                          className="absolute -top-1.5 -right-1.5 h-5 w-5 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-gray-900"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
                       </div>
-                    )}
-                    <button
-                      onClick={() => { setImagePreview(null); setImagemUrl(null) }}
-                      className="absolute -top-1.5 -right-1.5 h-5 w-5 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-gray-900"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+                    ))}
                   </div>
                 )}
 
@@ -928,14 +963,15 @@ export function ChatFab() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*,application/pdf,.txt,.md,.csv,.json"
+                    accept={ACCEPT}
+                    multiple
                     className="hidden"
                     onChange={handleImageSelect}
                   />
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={loading}
-                    title="Anexar imagem"
+                    title="Anexar imagens, PDFs ou textos"
                     className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:text-[#1D4ED8] hover:border-blue-300 hover:bg-blue-50 transition-colors disabled:opacity-40"
                   >
                     <ImageIcon className="h-4 w-4" />
@@ -957,7 +993,7 @@ export function ChatFab() {
                     size="icon"
                     className="absolute right-2 bottom-2 h-8 w-8 bg-[#1D4ED8] hover:bg-blue-800 text-white rounded-lg disabled:opacity-50"
                     onClick={() => handleSend(message)}
-                    disabled={(!message.trim() && !imagemUrl && !arquivo) || loading || enviandoImagem}
+                    disabled={(!message.trim() && !anexos.length) || loading || enviandoImagem}
                   >
                     <Send className="h-4 w-4" />
                   </Button>
@@ -968,46 +1004,24 @@ export function ChatFab() {
         </SheetContent>
       </Sheet>
 
-      {/* ── Modais ── */}
-      <Dialog open={isAcaoOpen} onOpenChange={setIsAcaoOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Criar Ação Operacional</DialogTitle></DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label>Título</Label>
-              <Input value={acaoForm.titulo_acao} onChange={(e) => setAcaoForm((p) => ({ ...p, titulo_acao: e.target.value }))} />
-            </div>
-            <div className="grid gap-2">
-              <Label>Plano Detalhado</Label>
-              <Textarea value={acaoForm.plano_detalhado} onChange={(e) => setAcaoForm((p) => ({ ...p, plano_detalhado: e.target.value }))} className="resize-none" rows={4} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAcaoOpen(false)}>Cancelar</Button>
-            <Button onClick={handleCriarAcao}>Salvar Ação</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Confirmação da alteração proposta pela IA (modo perguntar) */}
+      {acaoPendente && (
+        <ConfirmacaoAcao
+          acao={acaoPendente}
+          onConfirmar={() => aplicarAcao(acaoPendente, 'confirmado')}
+          onCancelar={() => setAcaoPendente(null)}
+        />
+      )}
 
-      <Dialog open={isInsightOpen} onOpenChange={setIsInsightOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Criar Insight</DialogTitle></DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label>Título</Label>
-              <Input value={insightForm.titulo} onChange={(e) => setInsightForm((p) => ({ ...p, titulo: e.target.value }))} />
-            </div>
-            <div className="grid gap-2">
-              <Label>Descrição</Label>
-              <Textarea value={insightForm.descricao} onChange={(e) => setInsightForm((p) => ({ ...p, descricao: e.target.value }))} className="resize-none" rows={4} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsInsightOpen(false)}>Cancelar</Button>
-            <Button onClick={handleCriarInsight}>Salvar Insight</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Perguntas que a IA faz antes de agir */}
+      {formularioPendente && (
+        <FormularioIA
+          formulario={formularioPendente}
+          onEnviar={responderFormulario}
+          onCancelar={() => setFormularioPendente(null)}
+        />
+      )}
+
     </>
   )
 }

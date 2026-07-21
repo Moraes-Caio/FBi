@@ -15,7 +15,7 @@ import { supabase } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
 const RESTAURANTE_VAZIO: RestauranteForm = { nome_restaurante: '', logo_url: '' }
-const MASCOTE_VAZIO: MascoteForm = { nome: '', personalidade: 'direto_objetivo', foto_url: '' }
+const MASCOTE_VAZIO: MascoteForm = { nome: '', personalidade: 'direto_objetivo', foto_url: '', modo_acao: 'perguntar' }
 
 /**
  * O que vai para a coluna jsonb. Fica de fora o que já tem coluna própria
@@ -60,7 +60,7 @@ export default function Settings() {
     const carregar = async () => {
       const { data } = await supabase
         .from('restaurantes')
-        .select('nome_restaurante, detalhes, logo_url, mascote_config, perfil_restaurante, tipo_culinaria, numero_mesas')
+        .select('nome_restaurante, detalhes, logo_url, mascote_config, perfil_restaurante, tipo_culinaria, numero_mesas, ia_modo_acao')
         .eq('id', restauranteId)
         .single()
 
@@ -84,6 +84,7 @@ export default function Settings() {
           nome: cfg.nome || '',
           personalidade: cfg.personalidade || 'direto_objetivo',
           foto_url: cfg.foto_url || '',
+          modo_acao: (data as any).ia_modo_acao === 'automatico' ? 'automatico' : 'perguntar',
         }
         setRestaurante(r)
         setMascote(m)
@@ -106,7 +107,8 @@ export default function Settings() {
       .update({
         nome_restaurante: restaurante.nome_restaurante,
         logo_url: restaurante.logo_url || null,
-        mascote_config: { ...mascoteBruto.current, ...mascote },
+        mascote_config: { ...mascoteBruto.current, nome: mascote.nome, personalidade: mascote.personalidade, foto_url: mascote.foto_url },
+        ia_modo_acao: mascote.modo_acao,
         // campos que já existem como coluna continuam nelas
         detalhes: perfil.detalhes,
         tipo_culinaria: perfil.tipo_culinaria || null,

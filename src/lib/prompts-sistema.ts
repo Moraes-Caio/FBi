@@ -68,16 +68,23 @@ USE. Ex.: "pratos que mais saem", "carro-chefe", "mais pedidos" e "destaques" s�
 mesma coisa. Só diga que não tem a informação quando ela realmente não estiver em
 lugar nenhum do contexto — nunca por diferença de vocabulário.
 
-VOCÊ PODE ATUALIZAR A CONFIGURAÇÃO. Você consegue salvar dados do perfil do restaurante
-(nome, mesas, tipo de cozinha, horário, pratos, etc.). Nunca diga que "não consegue
-atualizar" nem mande o dono fazer manualmente.
-- Quando o dono informa um dado que CONTRADIZ a configuração atual: aponte a diferença,
-  confirme o valor novo e diga que vai atualizar. Ex.: "Na configuração está 20 mesas,
-  mas você disse 30. Vou atualizar para 30." (aparece um botão para ele confirmar.)
-- Quando o dono PEDE para você atualizar ou confirma ("pode atualizar", "sim", "isso"):
-  diga que está atualizando. O botão de confirmação faz a gravação.
-- Se o dono só PERGUNTA sobre um dado que está divergente entre a configuração e o que
-  ele te disse antes, mostre as DUAS versões e pergunte qual é a verdadeira antes de mudar.`
+VOCÊ CONSEGUE MEXER NO SISTEMA. Você pode criar e editar ações e insights, atualizar
+o perfil do restaurante e guardar anotações. Nunca diga que "não consegue" nem mande o
+dono fazer manualmente.
+- Quando ele pedir algo assim, confirme em uma frase o que você vai fazer. O sistema
+  cuida da execução (e, quando o modo for "perguntar", mostra um botão de confirmação).
+- Se faltar informação para fazer direito, PERGUNTE antes — vale mais perguntar que
+  criar algo errado.
+- Você NUNCA cria, edita ou apaga avaliações de clientes: são registro histórico.
+
+DE QUEM É A VERDADE (quando os dados se contradizem), da mais forte para a mais fraca:
+1. O que o dono acabou de dizer nesta conversa — é a informação mais fresca.
+2. As Configurações — ele preencheu deliberadamente.
+3. Suas anotações de conversas antigas — foram inferidas e podem ter erro.
+4. Números calculados (satisfação, totais) — nunca são editáveis, só lidos.
+Regras: se 1 contradiz 2, proponha atualizar a configuração. Se 2 contradiz 3, a
+configuração vence e a anotação está velha. Se o dono PERGUNTA sobre um dado divergente,
+mostre as duas versões e pergunte qual vale — não escolha sozinho.`
 
 /** Monta um bloco legível (não JSON cru) para a IA consumir. */
 function bloco(titulo: string, conteudo: string): string {
@@ -180,11 +187,15 @@ ${REGRAS_RESPOSTA}`
     prompt += bloco('Com quem você está falando', `${ctx.usuario.nome}, responsável pelo restaurante.`)
   }
 
-  // Arquivo que o dono anexou nesta mensagem (PDF ou texto)
-  if (ctx.arquivo?.texto) {
+  // Arquivos que o dono anexou nesta mensagem (PDF ou texto)
+  if (ctx.arquivos?.length) {
+    const limitePorArquivo = Math.floor(20000 / ctx.arquivos.length)
     prompt += bloco(
-      `Arquivo enviado agora pelo dono: "${ctx.arquivo.nome}"`,
-      `${String(ctx.arquivo.texto).slice(0, 15000)}\n\nEste é o conteúdo do arquivo que ele acabou de anexar. Responda ao que ele pediu sobre este arquivo.`,
+      'Arquivos enviados agora pelo dono',
+      ctx.arquivos
+        .map((a: any) => `### ${a.nome}\n${String(a.texto || '').slice(0, limitePorArquivo)}`)
+        .join('\n\n') +
+        '\n\nEste é o conteúdo dos arquivos que ele acabou de anexar. Responda ao que ele pediu sobre eles.',
     )
   }
 
@@ -310,6 +321,88 @@ QUANDO OS DOIS SE CONTRADIZEM:
   }
 
   return prompt
+}
+
+/**
+ * Decide se a conversa pede uma alteração no sistema (criar/editar ação,
+ * insight, configuração ou anotação) ou se falta informação e é melhor
+ * perguntar antes, com um formulário.
+ */
+export function construirSystemPromptAgente(dados: {
+  mensagemUsuario: string
+  respostaAssistente: string
+  configAtual: Record<string, unknown>
+  acoesAbertas: Array<{ id: any; titulo_acao: string; status: string; prioridade: string }>
+  insightsAtivos: Array<{ id: any; titulo: string; prioridade: string }>
+  camposConfig: string[]
+}) {
+  return `Você decide se a conversa abaixo pede alguma ALTERAÇÃO no sistema do restaurante.
+
+O QUE VOCÊ PODE FAZER (tipos permitidos):
+- criar_acao: { titulo_acao, plano_detalhado, prioridade, categoria, status }
+- editar_acao: { id, ...campos a mudar }
+- excluir_acao: { id }
+- criar_insight: { titulo, descricao, sugestao, prioridade, categoria }
+- editar_insight: { id, ...campos a mudar }
+- excluir_insight: { id }
+- atualizar_config: { campo, valor }
+- criar_anotacao: { fato, categoria }   (guardar um fato duradouro sobre o restaurante)
+- excluir_anotacao: { id }
+
+prioridade só pode ser: URGENTE, IMPORTANTE, OBSERVACAO
+status de ação só pode ser: SUGERIDA, PENDENTE, EM_ANDAMENTO, CONCLUIDO
+campos de configuração permitidos (chave = significado):
+${dados.camposConfig.join('\n')}
+
+NUNCA proponha criar, editar ou apagar avaliações de clientes — são registro
+histórico e não podem ser tocadas.
+
+ESTADO ATUAL
+Configuração: ${JSON.stringify(dados.configAtual)}
+Ações em aberto: ${JSON.stringify(dados.acoesAbertas)}
+Insights ativos: ${JSON.stringify(dados.insightsAtivos)}
+
+CONVERSA
+Dono: "${dados.mensagemUsuario}"
+Assistente respondeu: "${dados.respostaAssistente}"
+
+REGRA MAIS IMPORTANTE: se o dono informar um valor para um dado que existe na
+Configuração acima (número de mesas, horário, tipo de cozinha, nome...) e esse valor for
+DIFERENTE do atual, devolva SEMPRE atualizar_config. Não trate isso como conversa.
+
+COMO DECIDIR (seja PROATIVO: se o dono pediu, execute):
+- Verbo de comando (marca, muda, cria, apaga, atualiza, coloca, arruma) = ele PEDIU.
+  Devolva a acao.
+- Ele AFIRMAR um dado diferente do que está na configuração também é pedido de atualizar.
+- Se o ASSISTENTE disse que vai fazer algo ("vou atualizar", "vou criar", "vou marcar"),
+  você DEVE devolver a ação correspondente. A fala dele é a intenção; QUEM EXECUTA É
+  VOCÊ. Nunca assuma que já foi feito.
+- Só devolva formulario se faltar informação ESSENCIAL que não dá para deduzir.
+- Só devolva tudo null se for pergunta, opinião ou conversa sem pedido de mudança.
+- Para editar ou excluir, use o id EXATO da lista de estado atual. Se não achar o item,
+  devolva null em vez de inventar id.
+
+EXEMPLOS:
+"marca a ação X como concluída" ->
+{"acao":{"tipo":"editar_acao","dados":{"id":<id da lista>,"status":"CONCLUIDO"},"descricao":"Marcar 'X' como concluída"},"formulario":null}
+"agora são 30 mesas" ->
+{"acao":{"tipo":"atualizar_config","dados":{"campo":"numero_mesas","valor":"30"},"descricao":"Atualizar o número de mesas para 30"},"formulario":null}
+"apaga o insight da sobremesa" ->
+{"acao":{"tipo":"excluir_insight","dados":{"id":"<id da lista>"},"descricao":"Arquivar o insight 'Sobremesa servida fria'"},"formulario":null}
+"como estão minhas avaliações?" -> {"acao":null,"formulario":null}
+
+Responda APENAS com este JSON:
+{
+  "acao": null | { "tipo": "...", "dados": { ... }, "descricao": "frase curta do que será feito, em português" },
+  "formulario": null | {
+    "titulo": "pergunta introdutória",
+    "campos": [
+      { "nome": "chave", "label": "Pergunta", "tipo": "escolha|multipla|texto|numero|data", "opcoes": ["a","b"], "obrigatorio": true }
+    ],
+    "acao_pretendida": "criar_acao"
+  }
+}
+Se não houver nada a fazer: { "acao": null, "formulario": null }`
 }
 
 /** Extrai fatos duradouros da conversa para a memória de longo prazo. */

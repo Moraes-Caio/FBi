@@ -19,11 +19,14 @@ import { useToast } from '@/hooks/use-toast'
 import { supabase } from '@/lib/supabase/client'
 import { ASSISTANT_PERSONALITIES } from '@/lib/mascote-config'
 import { Bot, X, Loader2, Camera } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 export interface MascoteForm {
   nome: string
   personalidade: string
   foto_url: string
+  /** 'perguntar' = confirma antes de mexer | 'automatico' = já faz e permite desfazer */
+  modo_acao: 'perguntar' | 'automatico'
 }
 
 export function MascotTab({
@@ -189,6 +192,47 @@ export function MascotTab({
               </p>
             </div>
           </div>
+        </div>
+        <div className="border-t pt-6 space-y-3">
+          <div>
+            <Label>Quando a IA precisar mexer no sistema</Label>
+            <p className="text-xs text-muted-foreground mt-1">
+              Ela pode criar e editar ações e insights, e atualizar o perfil do restaurante.
+              Toda alteração fica registrada e pode ser desfeita.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {([
+              {
+                v: 'perguntar' as const,
+                titulo: 'Perguntar antes',
+                desc: 'Ela propõe e você confirma num popup. Recomendado.',
+              },
+              {
+                v: 'automatico' as const,
+                titulo: 'Fazer sozinha',
+                desc: 'Ela já aplica e mostra um botão para desfazer.',
+              },
+            ]).map((op) => (
+              <button
+                key={op.v}
+                type="button"
+                onClick={() => onChange({ ...value, modo_acao: op.v })}
+                className={cn(
+                  'rounded-lg border-2 p-3 text-left transition-all',
+                  value.modo_acao === op.v
+                    ? 'border-primary bg-primary/5'
+                    : 'border-gray-200 hover:bg-muted',
+                )}
+              >
+                <p className="text-sm font-semibold">{op.titulo}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">{op.desc}</p>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Excluir algo sempre pede confirmação, mesmo no modo automático.
+          </p>
         </div>
       </CardContent>
     </Card>

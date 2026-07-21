@@ -1,10 +1,14 @@
 import { useState, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { enviarMensagem, enviarMensagemComFontes, ChatMessage, FonteWeb } from '@/lib/openrouter'
-import { construirSystemPromptChef, MARCADOR_BUSCA, MARCADOR_LEITURA } from '@/lib/prompts-sistema'
+import {
+  construirSystemPromptChef, construirSystemPromptAgente,
+  MARCADOR_BUSCA, MARCADOR_LEITURA,
+} from '@/lib/prompts-sistema'
 import { memorizarDaConversa, FatoMemoria } from '@/lib/queries/memoria-assistente'
 import { buscarConhecimento, extrairTextoDeUrl as lerPagina } from '@/lib/queries/conhecimento'
-import { CAMPOS_CONFIG, campoValido } from '@/lib/queries/config-update'
+import { CAMPOS_CONFIG } from '@/lib/queries/config-update'
+import { AcaoAgente, FormularioIA, validarAcao } from '@/lib/queries/agente-ia'
 
 export interface AtualizacaoConfig {
   campo: string
@@ -12,21 +16,28 @@ export interface AtualizacaoConfig {
   rotulo: string
 }
 
+export interface AnexoMensagem {
+  nome: string
+  tipo: 'imagem' | 'pdf' | 'texto'
+  url?: string
+  texto?: string
+}
+
 export interface MensagemChat {
   id?: string
   role: 'user' | 'assistant'
   text: string
-  imageUrl?: string
-  intent?: 'criar_acao' | 'criar_insight' | null
-  suggestedData?: any
+  /** Anexos da mensagem (imagens, PDFs e textos) */
+  anexos?: AnexoMensagem[]
   fontes?: FonteWeb[]
 }
 
 export interface ResultadoEnvio {
   error?: string
-  intent?: 'criar_acao' | 'criar_insight' | null
-  suggestedData?: any
-  atualizacaoConfig?: AtualizacaoConfig | null
+  /** Alteração que o agente quer executar (ou já executou, no modo automático) */
+  acao?: AcaoAgente | null
+  /** Perguntas que a IA quer fazer antes de agir */
+  formulario?: (FormularioIA & { acao_pretendida?: string }) | null
 }
 
 export function useChat(contextoPagina: string, contextoDadosIniciais: any = {}) {
@@ -63,66 +74,68 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
    * chamada de rede. Devolve o histórico já com ela para o envio usar.
    */
   const adicionarMensagemUsuario = useCallback(
-    (texto: string, imageUrl?: string) => aplicar((prev) => [...prev, { role: 'user', text: texto, imageUrl }]),
+    (texto: string, anexos?: AnexoMensagem[]) =>
+      aplicar((prev) => [...prev, { role: 'user', text: texto, anexos }]),
     [aplicar],
   )
 
   /**
-   * Detecta se o usuário quer atualizar um dado da configuração — seja informando
-   * um valor novo, seja confirmando um que a IA acabou de propor.
+   * Detector único do agente: decide se a conversa pede uma alteração no
+   * sistema, ou se falta informação e é melhor perguntar antes (formulário).
+   * Substitui os dois detectores antigos (intenção + atualização de config).
    */
-  const detectarAtualizacaoConfig = async (
+  const detectarAcaoAgente = async (
     textoUsuario: string,
-    ultimaResposta: string,
-    configAtual: Record<string, unknown>,
-  ): Promise<AtualizacaoConfig | null> => {
+    respostaAssistente: string,
+    ctx: any,
+  ): Promise<{ acao: AcaoAgente | null; formulario: (FormularioIA & { acao_pretendida?: string }) | null }> => {
+    const vazio = { acao: null, formulario: null }
     try {
       const res = await enviarMensagem(
         [
           {
             role: 'system',
-            content: `Você decide se o usuário quer ATUALIZAR um dado da configuração do restaurante.
-
-Campos possíveis (use exatamente estas chaves): ${Object.keys(CAMPOS_CONFIG).join(', ')}.
-
-Configuração atual: ${JSON.stringify(configAtual)}
-Última fala do assistente: "${ultimaResposta}"
-
-Responda { "campo": <chave ou null>, "valor": <novo valor como texto> } apenas quando:
-- o usuário AFIRMA um dado que substitui o atual (ex: "meu nome é Breno", "agora são 30 mesas"), ou
-- o usuário CONFIRMA uma atualização que o assistente propôs (ex: "sim", "pode atualizar", "isso", "vc atualiza").
-Se o usuário só faz uma pergunta, ou não há valor novo claro, responda { "campo": null, "valor": "" }.`,
+            content: construirSystemPromptAgente({
+              mensagemUsuario: textoUsuario,
+              respostaAssistente,
+              configAtual: ctx.configAtual || {},
+              acoesAbertas: ctx.acoes || [],
+              insightsAtivos: ctx.insights || [],
+              camposConfig: Object.entries(CAMPOS_CONFIG).map(([k, v]) => `- ${k} = ${v}`),
+            }),
           },
-          { role: 'user', content: textoUsuario },
+          { role: 'user', content: 'Analise e responda no formato JSON pedido.' },
         ],
-        { response_format: { type: 'json_object' } },
+        // temperatura 0: a detecção precisa ser consistente, não criativa
+        // max_tokens folgado: JSON cortado pela metade quebra o parse
+        { response_format: { type: 'json_object' }, temperature: 0, max_tokens: 900 },
       )
-      const obj = res as any
-      if (obj?.campo && campoValido(obj.campo) && String(obj.valor || '').trim()) {
-        return { campo: obj.campo, valor: String(obj.valor).trim(), rotulo: CAMPOS_CONFIG[obj.campo] }
-      }
-      return null
-    } catch {
-      return null
-    }
-  }
 
-  const detectarIntencao = async (textoUsuario: string) => {
-    try {
-      const res = await enviarMensagem(
-        [
-          {
-            role: 'system',
-            content:
-              'Identifique se o usuário quer criar uma "acao" (plano de ação) ou um "insight". Retorne em formato JSON estrito: { "tipo": "criar_acao" | "criar_insight" | null, "dadosSugeridos": { "titulo": string, "descricao": string, "prioridade": "URGENTE"|"IMPORTANTE"|"OBSERVACAO" } }',
-          },
-          { role: 'user', content: textoUsuario },
-        ],
-        { response_format: { type: 'json_object' } },
-      )
-      return res as { tipo: 'criar_acao' | 'criar_insight' | null; dadosSugeridos: any }
+      const obj = typeof res === 'string' ? JSON.parse(res) : (res as any)
+      const acao: AcaoAgente | null =
+        obj?.acao?.tipo && obj?.acao?.dados
+          ? {
+              tipo: obj.acao.tipo,
+              dados: obj.acao.dados,
+              descricao: String(obj.acao.descricao || 'Alteração no sistema'),
+            }
+          : null
+
+      // Descarta ação inválida em vez de deixar quebrar na execução
+      if (acao && validarAcao(acao)) return { acao: null, formulario: obj?.formulario ?? null }
+
+      const formulario =
+        obj?.formulario?.campos?.length
+          ? {
+              titulo: String(obj.formulario.titulo || 'Preciso de mais alguns dados'),
+              campos: obj.formulario.campos.slice(0, 3),
+              acao_pretendida: obj.formulario.acao_pretendida,
+            }
+          : null
+
+      return { acao, formulario }
     } catch {
-      return { tipo: null, dadosSugeridos: null }
+      return vazio
     }
   }
 
@@ -149,8 +162,13 @@ Se o usuário só faz uma pergunta, ou não há valor novo claro, responda { "ca
             id: m.id,
             role: m.papel === 'usuario' ? ('user' as const) : ('assistant' as const),
             text: m.mensagem,
-            // a imagem fica em contexto_dados (o schema de mensagens_chat não é alterado)
-            imageUrl: (m.contexto_dados as any)?.imagem || undefined,
+            // anexos ficam em contexto_dados (o schema de mensagens_chat não muda);
+            // o formato antigo guardava só { imagem }
+            anexos:
+              (m.contexto_dados as any)?.anexos ||
+              ((m.contexto_dados as any)?.imagem
+                ? [{ nome: 'imagem', tipo: 'imagem', url: (m.contexto_dados as any).imagem }]
+                : undefined),
           })),
         )
       }
@@ -162,7 +180,7 @@ Se o usuário só faz uma pergunta, ou não há valor novo claro, responda { "ca
     texto: string,
     contextoDadosAdicionais: any = {},
     systemMessageOverride?: string,
-    imageUrl?: string,
+    anexos?: AnexoMensagem[],
     opcoes: { jaExibida?: boolean; memoria?: FatoMemoria[]; buscaWeb?: boolean } = {},
   ): Promise<ResultadoEnvio> => {
     enviandoRef.current = true
@@ -171,8 +189,8 @@ Se o usuário só faz uma pergunta, ou não há valor novo claro, responda { "ca
 
     // Se a UI já exibiu a mensagem (caminho normal), não duplica
     let currentMessages = messagesRef.current
-    if (!opcoes.jaExibida && (texto || imageUrl)) {
-      currentMessages = adicionarMensagemUsuario(texto, imageUrl)
+    if (!opcoes.jaExibida && (texto || anexos?.length)) {
+      currentMessages = adicionarMensagemUsuario(texto, anexos)
     }
 
     try {
@@ -193,11 +211,16 @@ Se o usuário só faz uma pergunta, ou não há valor novo claro, responda { "ca
       const apiMessages: ChatMessage[] = [
         { role: 'system', content: sysPrompt },
         ...currentMessages.map((m): ChatMessage => {
-          if (m.imageUrl) {
+          // Só imagens viram parte visual; PDF/texto vão como contexto textual
+          const imagens = (m.anexos || []).filter((a) => a.tipo === 'imagem' && a.url)
+          if (imagens.length) {
             return {
               role: m.role,
               content: [
-                { type: 'image_url', image_url: { url: m.imageUrl, detail: 'low' } },
+                ...imagens.map((a) => ({
+                  type: 'image_url' as const,
+                  image_url: { url: a.url!, detail: 'low' as const },
+                })),
                 ...(m.text ? [{ type: 'text' as const, text: m.text }] : []),
               ],
             }
@@ -300,14 +323,17 @@ Se o usuário só faz uma pergunta, ou não há valor novo claro, responda { "ca
 
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        if (texto || imageUrl) {
+        if (texto || anexos?.length) {
           await supabase.from('mensagens_chat').insert({
             usuario_id: user.id,
             sessao_id: sessaoId,
             mensagem: texto,
             papel: 'usuario',
             contexto_pagina: contextoPagina,
-            contexto_dados: { imagem: imageUrl || null },
+            // guarda só o necessário para reexibir (texto extraído fica de fora)
+            contexto_dados: {
+              anexos: (anexos || []).map((a) => ({ nome: a.nome, tipo: a.tipo, url: a.url ?? null })),
+            },
           })
         }
         await supabase.from('mensagens_chat').insert({
@@ -316,7 +342,7 @@ Se o usuário só faz uma pergunta, ou não há valor novo claro, responda { "ca
           mensagem: respostaTexto,
           papel: 'assistente',
           contexto_pagina: contextoPagina,
-          contexto_dados: { imagem: null },
+          contexto_dados: {},
         })
       }
 
@@ -330,31 +356,16 @@ Se o usuário só faz uma pergunta, ou não há valor novo claro, responda { "ca
         )
       }
 
-      let intent: ResultadoEnvio['intent'] = null
-      let suggestedData: any = null
-      let atualizacaoConfig: AtualizacaoConfig | null = null
+      // Detecção do agente — roda em bastidor, depois da resposta
+      let acao: AcaoAgente | null = null
+      let formulario: (FormularioIA & { acao_pretendida?: string }) | null = null
       if (texto) {
-        // As duas detecções rodam em paralelo, em bastidor
-        const [deteccao, atual] = await Promise.all([
-          detectarIntencao(texto),
-          contextoFinal.configAtual
-            ? detectarAtualizacaoConfig(texto, respostaTexto, contextoFinal.configAtual)
-            : Promise.resolve(null),
-        ])
-        intent = deteccao.tipo
-        suggestedData = deteccao.dadosSugeridos
-        atualizacaoConfig = atual
-        if (intent) {
-          aplicar((prev) => {
-            const copia = [...prev]
-            const ultimo = copia[copia.length - 1]
-            if (ultimo?.role === 'assistant') copia[copia.length - 1] = { ...ultimo, intent, suggestedData }
-            return copia
-          })
-        }
+        const r = await detectarAcaoAgente(texto, respostaTexto, contextoFinal)
+        acao = r.acao
+        formulario = r.formulario
       }
 
-      return { intent, suggestedData, atualizacaoConfig }
+      return { acao, formulario }
     } catch (err: any) {
       const msg = err.message || 'Erro ao comunicar com a IA'
       setError(msg)
