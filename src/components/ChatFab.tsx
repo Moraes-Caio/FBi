@@ -18,6 +18,7 @@ import {
   FileText,
   Zap,
   HelpCircle,
+  Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -96,6 +97,19 @@ function toggleFixada(id: string): boolean {
     JSON.stringify(isFixed ? fixadas.filter((f) => f !== id) : [...fixadas, id]),
   )
   return !isFixed
+}
+
+/** Texto do botão que abre a confirmação, por tipo de alteração. */
+const ROTULO_ACAO: Record<string, string> = {
+  criar_acao: 'Criar esta ação',
+  editar_acao: 'Editar a ação',
+  excluir_acao: 'Excluir a ação',
+  criar_insight: 'Criar este insight',
+  editar_insight: 'Editar o insight',
+  excluir_insight: 'Arquivar o insight',
+  atualizar_config: 'Alterar a configuração',
+  criar_anotacao: 'Guardar esta anotação',
+  excluir_anotacao: 'Apagar a anotação',
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -193,6 +207,8 @@ export function ChatFab() {
   const [failedMessage, setFailedMessage] = useState('')
   // Fluxo do agente
   const [acaoPendente, setAcaoPendente] = useState<AcaoAgente | null>(null)
+  // O popup não abre sozinho: aparece um botão na resposta e o dono decide abrir
+  const [popupAberto, setPopupAberto] = useState(false)
   const [formularioPendente, setFormularioPendente] = useState<(TipoFormulario & { acao_pretendida?: string }) | null>(null)
   // Ações já aplicadas nesta conversa: ficam marcadas abaixo do chat
   const [registrosFeitos, setRegistrosFeitos] = useState<RegistroAcao[]>([])
@@ -599,6 +615,7 @@ export function ChatFab() {
       const registro = await executarAcao(usuario.restaurante_id, final, modo)
       if (registro) setRegistrosFeitos((p) => [...p, registro])
       setAcaoPendente(null)
+      setPopupAberto(false)
       refetchConfig()
       toast({
         title: modo === 'automatico' ? 'Feito pela IA' : 'Alteração aplicada',
@@ -607,6 +624,7 @@ export function ChatFab() {
     } catch (e: any) {
       toast({ title: 'Não consegui aplicar', description: e.message, variant: 'destructive' })
       setAcaoPendente(null)
+      setPopupAberto(false)
     }
   }
 
@@ -702,23 +720,6 @@ export function ChatFab() {
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button
-                      onClick={alternarModo}
-                      title={
-                        modoAcao === 'automatico'
-                          ? 'A IA faz sozinha (clique para ela perguntar antes)'
-                          : 'A IA pergunta antes (clique para ela fazer sozinha)'
-                      }
-                      className={cn(
-                        'flex items-center gap-1 h-8 px-2 rounded-full text-[10px] font-semibold transition-colors',
-                        modoAcao === 'automatico'
-                          ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
-                      )}
-                    >
-                      {modoAcao === 'automatico' ? <Zap className="h-3 w-3" /> : <HelpCircle className="h-3 w-3" />}
-                      {modoAcao === 'automatico' ? 'Automático' : 'Perguntar'}
-                    </button>
                     <button onClick={handleOpenHistory} title="Histórico" className="h-8 w-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500">
                       <History className="h-4 w-4" />
                     </button>
@@ -899,6 +900,19 @@ export function ChatFab() {
                           {!!msg.fontes?.length && <Fontes fontes={msg.fontes} />}
                         </div>
                       </div>
+                      {isLast && msg.role === 'assistant' && acaoPendente && !loading && (
+                        <div className="flex w-full justify-start pl-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 text-xs h-8 rounded-full border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
+                            onClick={() => setPopupAberto(true)}
+                          >
+                            <Sparkles className="h-3 w-3" />
+                            {ROTULO_ACAO[acaoPendente.tipo] || 'Revisar alteração'}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -1034,6 +1048,24 @@ export function ChatFab() {
                   >
                     <ImageIcon className="h-4 w-4" />
                   </button>
+                  <button
+                    onClick={alternarModo}
+                    disabled={loading}
+                    title={
+                      modoAcao === 'automatico'
+                        ? 'A IA aplica as alterações sozinha. Clique para ela perguntar antes.'
+                        : 'A IA pergunta antes de alterar. Clique para ela fazer sozinha.'
+                    }
+                    className={cn(
+                      'h-9 shrink-0 flex items-center gap-1.5 px-2.5 rounded-lg border text-[11px] font-semibold transition-colors disabled:opacity-40',
+                      modoAcao === 'automatico'
+                        ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                        : 'border-gray-200 text-gray-500 hover:text-[#1D4ED8] hover:border-blue-300 hover:bg-blue-50',
+                    )}
+                  >
+                    {modoAcao === 'automatico' ? <Zap className="h-3.5 w-3.5" /> : <HelpCircle className="h-3.5 w-3.5" />}
+                    {modoAcao === 'automatico' ? 'Automático' : 'Perguntar'}
+                  </button>
                   <Textarea
                     placeholder={`Pergunte ao ${mascoteNome}...`}
                     className="min-h-[60px] max-h-[120px] resize-none pr-12 rounded-xl text-sm"
@@ -1063,11 +1095,11 @@ export function ChatFab() {
       </Sheet>
 
       {/* Confirmação da alteração proposta pela IA (modo perguntar) */}
-      {acaoPendente && (
+      {acaoPendente && popupAberto && (
         <ConfirmacaoAcao
           acao={acaoPendente}
           onConfirmar={(dados) => aplicarAcao(acaoPendente, 'confirmado', dados)}
-          onCancelar={() => setAcaoPendente(null)}
+          onCancelar={() => setPopupAberto(false)}
         />
       )}
 
