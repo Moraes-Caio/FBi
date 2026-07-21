@@ -19,6 +19,7 @@ import {
   Zap,
   HelpCircle,
   Sparkles,
+  ArrowDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -183,7 +184,8 @@ export function ChatFab() {
   const { toast } = useToast()
   const {
     messages, loading, buscandoWeb, sessaoId, enviar, adicionarMensagemUsuario,
-    removerUltimaMensagem, carregarHistorico, novaConversa, mudarSessao,
+    removerUltimaMensagem, anexarRegistro, removerRegistro,
+    carregarHistorico, novaConversa, mudarSessao,
   } = useChat('global')
 
   const [open, setOpen] = useState(false)
@@ -202,6 +204,8 @@ export function ChatFab() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const areaRolagemRef = useRef<HTMLDivElement>(null)
+  const [longeDoFim, setLongeDoFim] = useState(false)
 
   const [hasError, setHasError] = useState(false)
   const [failedMessage, setFailedMessage] = useState('')
@@ -212,6 +216,8 @@ export function ChatFab() {
   const [formularioPendente, setFormularioPendente] = useState<(TipoFormulario & { acao_pretendida?: string }) | null>(null)
   // Ações já aplicadas nesta conversa: ficam marcadas abaixo do chat
   const [registrosFeitos, setRegistrosFeitos] = useState<RegistroAcao[]>([])
+  // Enquanto um popup está aberto, o Sheet do chat não pode fechar
+  const temPopupAberto = popupAberto || !!formularioPendente
   const [modoAcao, setModoAcao] = useState<'perguntar' | 'automatico'>('perguntar')
   // ref espelha o modo: handleSend captura o state pelo closure e leria o valor
   // antigo na primeira mensagem depois que o modo é carregado do banco
@@ -221,9 +227,27 @@ export function ChatFab() {
     if (open && user) carregarHistorico(sessaoId)
   }, [open, user, sessaoId, carregarHistorico])
 
+  const irParaOFim = useCallback((suave = true) => {
+    scrollRef.current?.scrollIntoView({ behavior: suave ? 'smooth' : 'auto' })
+    setLongeDoFim(false)
+  }, [])
+
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading, hasError])
+    if (!longeDoFim) irParaOFim()
+  }, [messages, loading, hasError, longeDoFim, irParaOFim])
+
+  // Ao abrir (ou trocar de conversa), começa sempre no fim
+  useEffect(() => {
+    if (open) {
+      const t = setTimeout(() => irParaOFim(false), 80)
+      return () => clearTimeout(t)
+    }
+  }, [open, view, sessaoId, irParaOFim])
+
+  const aoRolar = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    setLongeDoFim(el.scrollHeight - el.clientHeight - el.scrollTop > 120)
+  }
 
   useEffect(() => {
     if (renamingId && renameInputRef.current) renameInputRef.current.focus()
@@ -599,6 +623,9 @@ export function ChatFab() {
         await aplicarAcao(result.acao, 'automatico')
       } else {
         setAcaoPendente(result.acao)
+        // Já temos o necessário: abre a revisão direto, com os campos preenchidos.
+        // Se o dono cancelar, o botão continua na resposta para reabrir.
+        setPopupAberto(true)
       }
     }
   }
@@ -613,7 +640,10 @@ export function ChatFab() {
     const final: AcaoAgente = dadosEditados ? { ...acao, dados: dadosEditados } : acao
     try {
       const registro = await executarAcao(usuario.restaurante_id, final, modo)
-      if (registro) setRegistrosFeitos((p) => [...p, registro])
+      if (registro) {
+        setRegistrosFeitos((p) => [...p, registro])
+        anexarRegistro({ id: registro.id, descricao: registro.descricao })
+      }
       setAcaoPendente(null)
       setPopupAberto(false)
       refetchConfig()
@@ -628,10 +658,13 @@ export function ChatFab() {
     }
   }
 
-  const desfazer = async (registro: RegistroAcao) => {
+  const desfazer = async (id: string) => {
+    const registro = registrosFeitos.find((r) => r.id === id)
+    if (!registro) return
     try {
       await reverterAcao(registro)
-      setRegistrosFeitos((p) => p.filter((r) => r.id !== registro.id))
+      setRegistrosFeitos((p) => p.filter((r) => r.id !== id))
+      removerRegistro(id)
       refetchConfig()
       toast({ title: 'Desfeito', description: 'O estado anterior foi restaurado.' })
     } catch (e: any) {
@@ -640,8 +673,10 @@ export function ChatFab() {
   }
 
   /** Só tira a marca da tela — a alteração continua valendo no sistema. */
-  const ocultarRegistro = (id: string) =>
+  const ocultarRegistro = (id: string) => {
     setRegistrosFeitos((p) => p.filter((r) => r.id !== id))
+    removerRegistro(id)
+  }
 
   const alternarModo = async () => {
     const novo = modoAcaoRef.current === 'automatico' ? 'perguntar' : 'automatico'
@@ -675,8 +710,8 @@ export function ChatFab() {
 
   const messagesToRender =
     messages.length === 0
-      ? [{ role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, anexos: undefined, fontes: undefined }]
-      : messages.map((m) => ({ role: m.role, content: m.text, anexos: m.anexos, fontes: m.fontes }))
+      ? [{ role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, anexos: undefined, fontes: undefined, registros: undefined }]
+      : messages.map((m) => ({ role: m.role, content: m.text, anexos: m.anexos, fontes: m.fontes, registros: m.registros }))
 
   return (
     <>
@@ -690,7 +725,14 @@ export function ChatFab() {
           </Button>
         </SheetTrigger>
 
-        <SheetContent className="w-full sm:max-w-[380px] p-0 flex flex-col h-full border-l shadow-2xl">
+        <SheetContent
+          className="w-full sm:max-w-[380px] p-0 flex flex-col h-full border-l shadow-2xl"
+          // Sem isto, fechar o popup (Esc ou clique fora) fecha o chat junto:
+          // o evento do dialog aninhado borbulha para o Sheet.
+          onEscapeKeyDown={(e) => { if (temPopupAberto) e.preventDefault() }}
+          onPointerDownOutside={(e) => { if (temPopupAberto) e.preventDefault() }}
+          onInteractOutside={(e) => { if (temPopupAberto) e.preventDefault() }}
+        >
 
           {/* ── Header ── */}
           <SheetHeader className="p-4 border-b bg-white shrink-0">
@@ -846,7 +888,11 @@ export function ChatFab() {
 
           {!anexoAberto && view === 'chat' && (
             <>
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-white">
+              <div
+                ref={areaRolagemRef}
+                onScroll={aoRolar}
+                className="relative flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-white"
+              >
                 {messagesToRender.map((msg, i) => {
                   const isLast = i === messagesToRender.length - 1
                   return (
@@ -900,6 +946,35 @@ export function ChatFab() {
                           {!!msg.fontes?.length && <Fontes fontes={msg.fontes} />}
                         </div>
                       </div>
+                      {msg.role === 'assistant' && !!msg.registros?.length && (
+                        <div className="flex w-full justify-start pl-2">
+                          <div className="flex flex-col gap-1.5 w-full max-w-[85%]">
+                            {msg.registros.map((r) => (
+                              <div
+                                key={r.id}
+                                className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5"
+                              >
+                                <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                                <span className="text-[11px] text-emerald-900 flex-1 leading-snug">{r.descricao}</span>
+                                <button
+                                  onClick={() => desfazer(r.id)}
+                                  className="text-[11px] font-medium text-emerald-700 hover:text-emerald-900 shrink-0"
+                                  title="Reverter a alteração no sistema"
+                                >
+                                  Desfazer
+                                </button>
+                                <button
+                                  onClick={() => ocultarRegistro(r.id)}
+                                  className="h-4 w-4 rounded-full text-emerald-600 hover:bg-emerald-200 flex items-center justify-center shrink-0"
+                                  title="Só tirar este aviso (a alteração continua valendo)"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {isLast && msg.role === 'assistant' && acaoPendente && !loading && (
                         <div className="flex w-full justify-start pl-2">
                           <Button
@@ -947,6 +1022,16 @@ export function ChatFab() {
                   </div>
                 )}
                 <div ref={scrollRef} />
+
+                {longeDoFim && (
+                  <button
+                    onClick={() => irParaOFim()}
+                    title="Ir para o fim da conversa"
+                    className="sticky bottom-2 self-center z-10 flex items-center gap-1.5 rounded-full bg-white border border-gray-200 shadow-md px-3 py-1.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" /> Ir para o fim
+                  </button>
+                )}
               </div>
 
               <div className="p-4 border-t bg-white flex flex-col gap-3 shrink-0">
@@ -965,34 +1050,6 @@ export function ChatFab() {
                 </div>
 
                 {/* Preview de imagem */}
-                {registrosFeitos.length > 0 && (
-                  <div className="flex flex-col gap-1.5">
-                    {registrosFeitos.map((r) => (
-                      <div
-                        key={r.id}
-                        className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5"
-                      >
-                        <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                        <span className="text-[11px] text-emerald-900 flex-1 leading-snug">{r.descricao}</span>
-                        <button
-                          onClick={() => desfazer(r)}
-                          className="text-[11px] font-medium text-emerald-700 hover:text-emerald-900 shrink-0"
-                          title="Reverter a alteração no sistema"
-                        >
-                          Desfazer
-                        </button>
-                        <button
-                          onClick={() => ocultarRegistro(r.id)}
-                          className="h-4 w-4 rounded-full text-emerald-600 hover:bg-emerald-200 flex items-center justify-center shrink-0"
-                          title="Só tirar este aviso (a alteração continua valendo)"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
                 {anexos.length > 0 && (
                   <div className="flex flex-wrap gap-2">
                     {anexos.map((a) => (
@@ -1057,14 +1114,14 @@ export function ChatFab() {
                         : 'A IA pergunta antes de alterar. Clique para ela fazer sozinha.'
                     }
                     className={cn(
-                      'h-9 shrink-0 flex items-center gap-1.5 px-2.5 rounded-lg border text-[11px] font-semibold transition-colors disabled:opacity-40',
+                      'h-9 shrink-0 flex items-center gap-1.5 px-2 rounded-md text-[11px] font-medium transition-colors disabled:opacity-40',
                       modoAcao === 'automatico'
-                        ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
-                        : 'border-gray-200 text-gray-500 hover:text-[#1D4ED8] hover:border-blue-300 hover:bg-blue-50',
+                        ? 'text-amber-600 hover:bg-amber-50'
+                        : 'text-gray-500 hover:bg-gray-100',
                     )}
                   >
                     {modoAcao === 'automatico' ? <Zap className="h-3.5 w-3.5" /> : <HelpCircle className="h-3.5 w-3.5" />}
-                    {modoAcao === 'automatico' ? 'Automático' : 'Perguntar'}
+                    {modoAcao === 'automatico' ? 'Fazer sozinha' : 'Perguntar antes'}
                   </button>
                   <Textarea
                     placeholder={`Pergunte ao ${mascoteNome}...`}

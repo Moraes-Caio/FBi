@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { enviarMensagem, enviarMensagemComFontes, ChatMessage, FonteWeb } from '@/lib/openrouter'
 import {
-  construirSystemPromptChef, construirSystemPromptAgente,
+  construirSystemPromptChef, construirSystemPromptAgente, construirSystemPromptMontarCriacao,
   MARCADOR_BUSCA, MARCADOR_LEITURA,
 } from '@/lib/prompts-sistema'
 import { memorizarDaConversa, FatoMemoria } from '@/lib/queries/memoria-assistente'
@@ -30,6 +30,8 @@ export interface MensagemChat {
   /** Anexos da mensagem (imagens, PDFs e textos) */
   anexos?: AnexoMensagem[]
   fontes?: FonteWeb[]
+  /** Alterações aplicadas a partir desta resposta (marca de "feito") */
+  registros?: { id: string; descricao: string }[]
 }
 
 export interface ResultadoEnvio {
@@ -133,9 +135,62 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
             }
           : null
 
+      // Rede de segurança: o detector geral às vezes desiste de criar mesmo com
+      // pedido claro. Se a mensagem é um comando de criação, montamos os campos
+      // com uma chamada curta e de propósito único, bem mais confiável.
+      if (!acao && !formulario) {
+        const alvo = detectarPedidoDeCriacao(textoUsuario)
+        if (alvo) {
+          const montada = await montarCriacao(alvo, textoUsuario)
+          if (montada) return { acao: montada, formulario: null }
+        }
+      }
+
       return { acao, formulario }
     } catch {
       return vazio
+    }
+  }
+
+  /** Reconhece "cria/crie/criar uma ação|insight" sem depender do modelo. */
+  const detectarPedidoDeCriacao = (texto: string): 'acao' | 'insight' | null => {
+    const t = texto.toLowerCase()
+    if (!/(cri[ae]r?|adicion[ae]r?|abr[ae]r?|faz|faça|fazer)/.test(t)) return null
+    if (/insight/.test(t)) return 'insight'
+    if (/a[çc][ãa]o|tarefa/.test(t)) return 'acao'
+    return null
+  }
+
+  const montarCriacao = async (
+    tipo: 'acao' | 'insight',
+    textoUsuario: string,
+  ): Promise<AcaoAgente | null> => {
+    try {
+      const res = await enviarMensagem(
+        [
+          { role: 'system', content: construirSystemPromptMontarCriacao(tipo, textoUsuario) },
+          { role: 'user', content: 'Monte os campos no formato JSON pedido.' },
+        ],
+        { response_format: { type: 'json_object' }, temperature: 0, max_tokens: 500 },
+      )
+      const d = typeof res === 'string' ? JSON.parse(res) : (res as any)
+      if (tipo === 'acao' && d?.titulo_acao) {
+        return {
+          tipo: 'criar_acao',
+          dados: d,
+          descricao: `Criar a ação "${d.titulo_acao}"`,
+        }
+      }
+      if (tipo === 'insight' && d?.titulo) {
+        return {
+          tipo: 'criar_insight',
+          dados: d,
+          descricao: `Criar o insight "${d.titulo}"`,
+        }
+      }
+      return null
+    } catch {
+      return null
     }
   }
 
@@ -392,6 +447,29 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
   const removerUltimaMensagem = useCallback(() => aplicar((prev) => prev.slice(0, -1)), [aplicar])
 
+  /** Prende a marca de "feito" à última resposta da IA. */
+  const anexarRegistro = useCallback(
+    (registro: { id: string; descricao: string }) =>
+      aplicar((prev) => {
+        const copia = [...prev]
+        for (let i = copia.length - 1; i >= 0; i--) {
+          if (copia[i].role === 'assistant') {
+            copia[i] = { ...copia[i], registros: [...(copia[i].registros || []), registro] }
+            break
+          }
+        }
+        return copia
+      }),
+    [aplicar],
+  )
+
+  /** Tira a marca da tela (a alteração continua valendo no sistema). */
+  const removerRegistro = useCallback(
+    (id: string) =>
+      aplicar((prev) => prev.map((m) => (m.registros ? { ...m, registros: m.registros.filter((r) => r.id !== id) } : m))),
+    [aplicar],
+  )
+
   return {
     messages,
     loading,
@@ -400,6 +478,8 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     enviar,
     adicionarMensagemUsuario,
     removerUltimaMensagem,
+    anexarRegistro,
+    removerRegistro,
     carregarHistorico,
     setMessages: (m: MensagemChat[]) => aplicar(() => m),
     setError,

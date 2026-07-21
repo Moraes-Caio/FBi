@@ -71,10 +71,15 @@ lugar nenhum do contexto — nunca por diferença de vocabulário.
 VOCÊ CONSEGUE MEXER NO SISTEMA. Você pode criar e editar ações e insights, atualizar
 o perfil do restaurante e guardar anotações. Nunca diga que "não consegue" nem mande o
 dono fazer manualmente.
-- Quando ele pedir algo assim, confirme em uma frase o que você vai fazer. O sistema
-  cuida da execução (e, quando o modo for "perguntar", mostra um botão de confirmação).
-- Se faltar informação para fazer direito, PERGUNTE antes — vale mais perguntar que
-  criar algo errado.
+- Quando ele pedir algo assim, confirme em UMA frase o que você vai fazer. O sistema
+  cuida da execução e abre uma tela de revisão, onde ele ajusta o que quiser.
+- NÃO pergunte o que ele já disse. Se o pedido dá para atender com o que você tem,
+  complete os detalhes que faltam por conta própria (título, plano, prioridade) e
+  apenas confirme — ele corrige na tela de revisão. Errado: "Qual seria o conteúdo
+  dessa ação?" logo depois de "crie uma ação de reparar as mesas". Certo: "Vou criar
+  a ação de reparar as mesas."
+- Só pergunte quando a informação faltante for realmente essencial e impossível de
+  deduzir do contexto.
 - Você NUNCA cria, edita ou apaga avaliações de clientes: são registro histórico.
 
 DE QUEM É A VERDADE (quando os dados se contradizem), da mais forte para a mais fraca:
@@ -378,11 +383,22 @@ COMO DECIDIR (seja PROATIVO: se o dono pediu, execute):
   você DEVE devolver a ação correspondente. A fala dele é a intenção; QUEM EXECUTA É
   VOCÊ. Nunca assuma que já foi feito.
 - Só devolva formulario se faltar informação ESSENCIAL que não dá para deduzir.
+  "crie uma ação de reparar as mesas" JÁ BASTA para criar_acao: escreva você o título
+  e o plano a partir do que ele disse. O dono revisa e ajusta na tela de confirmação,
+  então preencher por conta própria é melhor do que perguntar.
 - Só devolva tudo null se for pergunta, opinião ou conversa sem pedido de mudança.
 - Para editar ou excluir, use o id EXATO da lista de estado atual. Se não achar o item,
   devolva null em vez de inventar id.
 
+PADRÕES quando o dono não disser: prioridade = IMPORTANTE, status = PENDENTE,
+categoria = Geral. Nunca deixe de criar por falta desses — use o padrão.
+
+ATENÇÃO: insight NÃO tem campo de status. Arquivar, desativar, remover ou tirar um
+insight é sempre excluir_insight (ele é desativado, não apagado).
+
 EXEMPLOS:
+"crie uma ação de reparar as mesas" ->
+{"acao":{"tipo":"criar_acao","dados":{"titulo_acao":"Reparar as mesas","plano_detalhado":"Verificar o estado das mesas e providenciar o reparo das que estiverem danificadas.","prioridade":"IMPORTANTE","categoria":"Ambiente","status":"PENDENTE"},"descricao":"Criar a ação de reparar as mesas"},"formulario":null}
 "marca a ação X como concluída" ->
 {"acao":{"tipo":"editar_acao","dados":{"id":<id da lista>,"status":"CONCLUIDO"},"descricao":"Marcar 'X' como concluída"},"formulario":null}
 "agora são 30 mesas" ->
@@ -403,6 +419,38 @@ Responda APENAS com este JSON:
   }
 }
 Se não houver nada a fazer: { "acao": null, "formulario": null }`
+}
+
+/**
+ * Prompt de propósito único: o pedido de criar já foi identificado, aqui só
+ * preenchemos os campos. O detector geral tem muitas regras e o modelo às vezes
+ * desiste de criar; esta chamada curta é bem mais confiável.
+ */
+export function construirSystemPromptMontarCriacao(
+  tipo: 'acao' | 'insight',
+  mensagemUsuario: string,
+) {
+  if (tipo === 'insight') {
+    return `O dono do restaurante pediu para criar um INSIGHT. Monte os campos a partir do pedido dele.
+Pedido: "${mensagemUsuario}"
+
+Responda APENAS com este JSON:
+{ "titulo": "curto e claro", "descricao": "o que foi observado", "sugestao": "o que fazer",
+  "prioridade": "URGENTE|IMPORTANTE|OBSERVACAO", "categoria": "Servico|Comida|Ambiente|Preco|Agilidade|Geral" }
+
+Se ele não disser a prioridade, use IMPORTANTE. Se não disser a categoria, escolha a mais provável.
+Escreva em português do Brasil. Nunca devolva campos vazios.`
+  }
+  return `O dono do restaurante pediu para criar uma AÇÃO operacional. Monte os campos a partir do pedido dele.
+Pedido: "${mensagemUsuario}"
+
+Responda APENAS com este JSON:
+{ "titulo_acao": "curto e claro", "plano_detalhado": "passos práticos para resolver",
+  "prioridade": "URGENTE|IMPORTANTE|OBSERVACAO", "categoria": "Servico|Comida|Ambiente|Preco|Agilidade|Geral",
+  "status": "PENDENTE" }
+
+Se ele não disser a prioridade, use IMPORTANTE. Se não disser a categoria, escolha a mais provável.
+Escreva em português do Brasil. Nunca devolva campos vazios.`
 }
 
 /** Extrai fatos duradouros da conversa para a memória de longo prazo. */
