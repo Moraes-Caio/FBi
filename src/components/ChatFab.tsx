@@ -191,7 +191,7 @@ export function ChatFab({
   const { toast } = useToast()
   const {
     messages, loading, buscandoWeb, sessaoId, enviar, adicionarMensagemUsuario,
-    removerUltimaMensagem, anexarProposta, limparProposta, anexarRegistro, removerRegistro,
+    removerUltimaMensagem, excluirMensagem, editarMensagem, anexarProposta, limparProposta, anexarRegistro, removerRegistro,
     carregarHistorico, novaConversa, mudarSessao,
   } = useChat('global')
 
@@ -207,7 +207,12 @@ export function ChatFab({
   const [enviandoImagem, setEnviandoImagem] = useState(false)
   const [anexoAberto, setAnexoAberto] = useState<AnexoVisivel | null>(null)
   // Mensagem citada: o trecho vai como contexto para a IA saber do que se trata
-  const [citacao, setCitacao] = useState<{ autor: 'user' | 'assistant'; texto: string } | null>(null)
+  const [citacao, setCitacao] = useState<{ autor: 'user' | 'assistant'; texto: string; uid: string } | null>(null)
+  const [editandoUid, setEditandoUid] = useState<string | null>(null)
+  const [textoEdicao, setTextoEdicao] = useState('')
+  const [destacada, setDestacada] = useState<string | null>(null)
+  // Guarda o elemento de cada mensagem para poder rolar ate ela
+  const refsMensagens = useRef<Record<string, HTMLDivElement | null>>({})
   const memoriaRef = useRef<FatoMemoria[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -250,6 +255,22 @@ export function ChatFab({
       return () => clearTimeout(t)
     }
   }, [open, view, sessaoId, irParaOFim])
+
+  /** Rola ate a mensagem citada e a destaca por 2 segundos. */
+  const irParaMensagem = (uid: string) => {
+    const el = refsMensagens.current[uid]
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setDestacada(uid)
+    setTimeout(() => setDestacada((atual) => (atual === uid ? null : atual)), 2000)
+  }
+
+  const salvarEdicao = async () => {
+    if (!editandoUid || !textoEdicao.trim()) return
+    await editarMensagem(editandoUid, textoEdicao.trim())
+    setEditandoUid(null)
+    setTextoEdicao('')
+  }
 
   const aoRolar = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget
@@ -919,7 +940,14 @@ export function ChatFab({
                 {messagesToRender.map((msg, i) => {
                   const isLast = i === messagesToRender.length - 1
                   return (
-                    <div key={i} className="flex flex-col gap-2">
+                    <div
+                      key={msg.uid}
+                      ref={(el) => { refsMensagens.current[msg.uid] = el }}
+                      className={cn(
+                        'flex flex-col gap-2 rounded-2xl transition-colors duration-500',
+                        destacada === msg.uid && 'bg-amber-100/70 ring-2 ring-amber-300 -mx-1 px-1 py-1',
+                      )}
+                    >
                       <div className={cn('group/msg flex w-full gap-1', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
                         <div
                           className={cn(
@@ -930,7 +958,12 @@ export function ChatFab({
                           )}
                         >
                           {!!msg.anexos?.length && (
-                            <div className="flex flex-wrap gap-1.5 mb-2">
+                            <div
+                              className={cn(
+                                'flex flex-wrap gap-1.5 mb-2',
+                                msg.role === 'user' ? 'justify-end' : 'justify-start',
+                              )}
+                            >
                               {msg.anexos.map((a, ai) =>
                                 a.tipo === 'imagem' ? (
                                   <button key={ai} onClick={() => abrirAnexo(a)} className="block">
@@ -959,7 +992,29 @@ export function ChatFab({
                               )}
                             </div>
                           )}
-                          {msg.role === 'user' ? (
+                          {msg.role === 'user' && editandoUid === msg.uid ? (
+                            <div className="flex flex-col gap-1.5 min-w-[180px]">
+                              <Textarea
+                                autoFocus
+                                rows={2}
+                                value={textoEdicao}
+                                onChange={(e) => setTextoEdicao(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); salvarEdicao() }
+                                  if (e.key === 'Escape') setEditandoUid(null)
+                                }}
+                                className="resize-none text-sm bg-white/15 border-white/30 text-white"
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button onClick={() => setEditandoUid(null)} className="text-[11px] text-white/70 hover:text-white">
+                                  Cancelar
+                                </button>
+                                <button onClick={salvarEdicao} className="text-[11px] font-semibold text-white">
+                                  Salvar
+                                </button>
+                              </div>
+                            </div>
+                          ) : msg.role === 'user' ? (
                             <span className="whitespace-pre-wrap">
                               {parseInline(msg.content as string, LINK_ESCURO)}
                             </span>
@@ -968,15 +1023,42 @@ export function ChatFab({
                           )}
                           {!!msg.fontes?.length && <Fontes fontes={msg.fontes} />}
                         </div>
-                        <button
-                          onClick={() =>
-                            setCitacao({ autor: msg.role, texto: String(msg.content).slice(0, 400) })
-                          }
-                          title="Responder esta mensagem"
-                          className="opacity-0 group-hover/msg:opacity-100 transition-opacity self-center h-6 w-6 shrink-0 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-700 flex items-center justify-center"
-                        >
-                          <Reply className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="opacity-0 group-hover/msg:opacity-100 transition-opacity self-center flex items-center gap-0.5 shrink-0">
+                          <button
+                            onClick={() =>
+                              setCitacao({
+                                autor: msg.role,
+                                texto: String(msg.content).slice(0, 400),
+                                uid: msg.uid,
+                              })
+                            }
+                            title="Responder esta mensagem"
+                            className="h-6 w-6 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-700 flex items-center justify-center"
+                          >
+                            <Reply className="h-3.5 w-3.5" />
+                          </button>
+                          {msg.role === 'user' && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditandoUid(msg.uid)
+                                  setTextoEdicao(String(msg.content))
+                                }}
+                                title="Editar mensagem"
+                                className="h-6 w-6 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-700 flex items-center justify-center"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => excluirMensagem(msg.uid)}
+                                title="Excluir mensagem"
+                                className="h-6 w-6 rounded-full hover:bg-red-50 text-gray-400 hover:text-red-600 flex items-center justify-center"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
                       {msg.role === 'assistant' && !!msg.registros?.length && (
                         <div className="flex w-full justify-start pl-2">
@@ -1084,12 +1166,16 @@ export function ChatFab({
                 {/* Preview de imagem */}
                 {citacao && (
                   <div className="flex items-start gap-2 rounded-lg border-l-2 border-primary bg-gray-50 px-3 py-2">
-                    <div className="min-w-0 flex-1">
+                    <button
+                      onClick={() => irParaMensagem(citacao.uid)}
+                      className="min-w-0 flex-1 text-left hover:opacity-80 transition-opacity"
+                      title="Ir para a mensagem"
+                    >
                       <p className="text-[10px] font-semibold text-primary">
                         Respondendo {citacao.autor === 'user' ? 'você mesmo' : mascoteNome}
                       </p>
                       <p className="text-[11px] text-gray-600 line-clamp-2">{citacao.texto}</p>
-                    </div>
+                    </button>
                     <button
                       onClick={() => setCitacao(null)}
                       className="h-4 w-4 shrink-0 rounded-full text-gray-400 hover:bg-gray-200 flex items-center justify-center"

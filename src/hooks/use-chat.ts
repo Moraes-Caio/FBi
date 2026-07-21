@@ -498,6 +498,58 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
   const removerUltimaMensagem = useCallback(() => aplicar((prev) => prev.slice(0, -1)), [aplicar])
 
+  /** Apaga uma mensagem do usuário e a resposta da IA que veio logo depois. */
+  const excluirMensagem = useCallback(
+    async (uid: string) => {
+      let idBanco: string | undefined
+      aplicar((prev) => {
+        const idx = prev.findIndex((m) => m.uid === uid)
+        if (idx === -1) return prev
+        idBanco = prev[idx].id
+        const fim = prev[idx + 1]?.role === 'assistant' ? idx + 2 : idx + 1
+        return [...prev.slice(0, idx), ...prev.slice(fim)]
+      })
+      // Remove do banco a mensagem e a resposta seguinte da mesma sessão
+      if (idBanco) {
+        const { data: user } = await supabase.auth.getUser()
+        if (user?.user) {
+          const { data: linhas } = await supabase
+            .from('mensagens_chat')
+            .select('id, created_at')
+            .eq('sessao_id', sessaoId)
+            .order('created_at', { ascending: true })
+          const i = (linhas || []).findIndex((l) => l.id === idBanco)
+          if (i !== -1) {
+            const alvos = [linhas![i].id]
+            if (linhas![i + 1]) alvos.push(linhas![i + 1].id)
+            await supabase.from('mensagens_chat').delete().in('id', alvos)
+          }
+        }
+      }
+    },
+    [aplicar, sessaoId],
+  )
+
+  /** Troca o texto de uma mensagem do usuário na tela e no banco. */
+  const editarMensagem = useCallback(
+    async (uid: string, novoTexto: string) => {
+      let idBanco: string | undefined
+      aplicar((prev) =>
+        prev.map((m) => {
+          if (m.uid === uid) {
+            idBanco = m.id
+            return { ...m, text: novoTexto }
+          }
+          return m
+        }),
+      )
+      if (idBanco) {
+        await supabase.from('mensagens_chat').update({ mensagem: novoTexto }).eq('id', idBanco)
+      }
+    },
+    [aplicar],
+  )
+
   /** Prende a proposta à última resposta da IA (o botão vive com a mensagem). */
   const anexarProposta = useCallback(
     (proposta: AcaoAgente | null): string | null => {
@@ -555,6 +607,8 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     enviar,
     adicionarMensagemUsuario,
     removerUltimaMensagem,
+    excluirMensagem,
+    editarMensagem,
     anexarProposta,
     limparProposta,
     anexarRegistro,
