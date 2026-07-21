@@ -20,6 +20,7 @@ import {
   HelpCircle,
   Sparkles,
   ArrowDown,
+  Reply,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -184,7 +185,7 @@ export function ChatFab() {
   const { toast } = useToast()
   const {
     messages, loading, buscandoWeb, sessaoId, enviar, adicionarMensagemUsuario,
-    removerUltimaMensagem, anexarRegistro, removerRegistro,
+    removerUltimaMensagem, anexarProposta, limparProposta, anexarRegistro, removerRegistro,
     carregarHistorico, novaConversa, mudarSessao,
   } = useChat('global')
 
@@ -200,6 +201,8 @@ export function ChatFab() {
   const [anexos, setAnexos] = useState<AnexoPendente[]>([])
   const [enviandoImagem, setEnviandoImagem] = useState(false)
   const [anexoAberto, setAnexoAberto] = useState<AnexoVisivel | null>(null)
+  // Mensagem citada: o trecho vai como contexto para a IA saber do que se trata
+  const [citacao, setCitacao] = useState<{ autor: 'user' | 'assistant'; texto: string } | null>(null)
   const memoriaRef = useRef<FatoMemoria[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -210,14 +213,13 @@ export function ChatFab() {
   const [hasError, setHasError] = useState(false)
   const [failedMessage, setFailedMessage] = useState('')
   // Fluxo do agente
-  const [acaoPendente, setAcaoPendente] = useState<AcaoAgente | null>(null)
-  // O popup não abre sozinho: aparece um botão na resposta e o dono decide abrir
-  const [popupAberto, setPopupAberto] = useState(false)
+  // Proposta aberta no popup: guarda a ação e de qual mensagem ela veio
+  const [popup, setPopup] = useState<{ acao: AcaoAgente; indice: number } | null>(null)
   const [formularioPendente, setFormularioPendente] = useState<(TipoFormulario & { acao_pretendida?: string }) | null>(null)
   // Ações já aplicadas nesta conversa: ficam marcadas abaixo do chat
   const [registrosFeitos, setRegistrosFeitos] = useState<RegistroAcao[]>([])
   // Enquanto um popup está aberto, o Sheet do chat não pode fechar
-  const temPopupAberto = popupAberto || !!formularioPendente
+  const temPopupAberto = !!popup || !!formularioPendente
   const [modoAcao, setModoAcao] = useState<'perguntar' | 'automatico'>('perguntar')
   // ref espelha o modo: handleSend captura o state pelo closure e leria o valor
   // antigo na primeira mensagem depois que o modo é carregado do banco
@@ -354,7 +356,6 @@ export function ChatFab() {
     setView('chat')
     setHasError(false)
     setFailedMessage('')
-    setAcaoPendente(null)
     setFormularioPendente(null)
     setAnexos([])
   }
@@ -581,6 +582,7 @@ export function ChatFab() {
     const msgTexto = text.trim()
     if ((!msgTexto && !anexos.length) || loading || enviandoImagem) return
 
+    const citando = citacao
     const anexosMsg: AnexoMensagem[] = anexos.map((a) => ({
       nome: a.nome, tipo: a.tipo, url: a.url, texto: a.texto,
     }))
@@ -589,9 +591,9 @@ export function ChatFab() {
 
     setMessage('')
     setAnexos([])
+    setCitacao(null)
     setHasError(false)
     setFailedMessage('')
-    setAcaoPendente(null)
     setFormularioPendente(null)
 
     // A mensagem aparece na hora — buscar contexto e chamar a IA vem depois
@@ -599,6 +601,7 @@ export function ChatFab() {
 
     const contexto: Record<string, any> = await fetchContexto()
     if (documentos.length) contexto.arquivos = documentos
+    if (citando) contexto.citacao = citando
 
     const result = await enviar(msgTexto, contexto, undefined, anexosMsg, {
       jaExibida: true,
@@ -622,10 +625,10 @@ export function ChatFab() {
       if (modoAcaoRef.current === 'automatico' && !destrutiva) {
         await aplicarAcao(result.acao, 'automatico')
       } else {
-        setAcaoPendente(result.acao)
-        // Já temos o necessário: abre a revisão direto, com os campos preenchidos.
-        // Se o dono cancelar, o botão continua na resposta para reabrir.
-        setPopupAberto(true)
+        // A proposta fica presa à resposta: o botão não some ao continuar a
+        // conversa, e dá para reabrir mesmo depois de rolar para cima.
+        const msgs = anexarProposta(result.acao)
+        setPopup({ acao: result.acao, indice: msgs.length - 1 })
       }
     }
   }
@@ -635,8 +638,17 @@ export function ChatFab() {
     acao: AcaoAgente,
     modo: 'automatico' | 'confirmado',
     dadosEditados?: Record<string, any>,
+    indiceMensagem?: number,
   ) => {
-    if (!usuario?.restaurante_id) return
+    if (!usuario?.restaurante_id) {
+      // Antes isto falhava calado e parecia que o botão não fazia nada
+      toast({
+        title: 'Não consegui identificar seu restaurante',
+        description: 'Recarregue a página e tente de novo.',
+        variant: 'destructive',
+      })
+      return
+    }
     const final: AcaoAgente = dadosEditados ? { ...acao, dados: dadosEditados } : acao
     try {
       const registro = await executarAcao(usuario.restaurante_id, final, modo)
@@ -644,8 +656,8 @@ export function ChatFab() {
         setRegistrosFeitos((p) => [...p, registro])
         anexarRegistro({ id: registro.id, descricao: registro.descricao })
       }
-      setAcaoPendente(null)
-      setPopupAberto(false)
+      if (indiceMensagem !== undefined) limparProposta(indiceMensagem)
+      setPopup(null)
       refetchConfig()
       toast({
         title: modo === 'automatico' ? 'Feito pela IA' : 'Alteração aplicada',
@@ -653,8 +665,6 @@ export function ChatFab() {
       })
     } catch (e: any) {
       toast({ title: 'Não consegui aplicar', description: e.message, variant: 'destructive' })
-      setAcaoPendente(null)
-      setPopupAberto(false)
     }
   }
 
@@ -710,8 +720,8 @@ export function ChatFab() {
 
   const messagesToRender =
     messages.length === 0
-      ? [{ role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, anexos: undefined, fontes: undefined, registros: undefined }]
-      : messages.map((m) => ({ role: m.role, content: m.text, anexos: m.anexos, fontes: m.fontes, registros: m.registros }))
+      ? [{ role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, anexos: undefined, fontes: undefined, registros: undefined, proposta: undefined }]
+      : messages.map((m) => ({ role: m.role, content: m.text, anexos: m.anexos, fontes: m.fontes, registros: m.registros, proposta: m.proposta }))
 
   return (
     <>
@@ -897,7 +907,7 @@ export function ChatFab() {
                   const isLast = i === messagesToRender.length - 1
                   return (
                     <div key={i} className="flex flex-col gap-2">
-                      <div className={cn('flex w-full', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                      <div className={cn('group/msg flex w-full gap-1', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
                         <div
                           className={cn(
                             'px-4 py-3 rounded-2xl text-sm max-w-[85%] shadow-sm',
@@ -945,6 +955,15 @@ export function ChatFab() {
                           )}
                           {!!msg.fontes?.length && <Fontes fontes={msg.fontes} />}
                         </div>
+                        <button
+                          onClick={() =>
+                            setCitacao({ autor: msg.role, texto: String(msg.content).slice(0, 400) })
+                          }
+                          title="Responder esta mensagem"
+                          className="opacity-0 group-hover/msg:opacity-100 transition-opacity self-center h-6 w-6 shrink-0 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-700 flex items-center justify-center"
+                        >
+                          <Reply className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                       {msg.role === 'assistant' && !!msg.registros?.length && (
                         <div className="flex w-full justify-start pl-2">
@@ -975,16 +994,16 @@ export function ChatFab() {
                           </div>
                         </div>
                       )}
-                      {isLast && msg.role === 'assistant' && acaoPendente && !loading && (
+                      {msg.role === 'assistant' && msg.proposta && (
                         <div className="flex w-full justify-start pl-2">
                           <Button
                             size="sm"
                             variant="outline"
                             className="gap-1.5 text-xs h-8 rounded-full border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
-                            onClick={() => setPopupAberto(true)}
+                            onClick={() => setPopup({ acao: msg.proposta!, indice: i })}
                           >
                             <Sparkles className="h-3 w-3" />
-                            {ROTULO_ACAO[acaoPendente.tipo] || 'Revisar alteração'}
+                            {ROTULO_ACAO[msg.proposta.tipo] || 'Revisar alteração'}
                           </Button>
                         </div>
                       )}
@@ -1050,6 +1069,23 @@ export function ChatFab() {
                 </div>
 
                 {/* Preview de imagem */}
+                {citacao && (
+                  <div className="flex items-start gap-2 rounded-lg border-l-2 border-primary bg-gray-50 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-semibold text-primary">
+                        Respondendo {citacao.autor === 'user' ? 'você mesmo' : mascoteNome}
+                      </p>
+                      <p className="text-[11px] text-gray-600 line-clamp-2">{citacao.texto}</p>
+                    </div>
+                    <button
+                      onClick={() => setCitacao(null)}
+                      className="h-4 w-4 shrink-0 rounded-full text-gray-400 hover:bg-gray-200 flex items-center justify-center"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+
                 {anexos.length > 0 && (
                   <div className="flex flex-wrap gap-2">
                     {anexos.map((a) => (
@@ -1152,11 +1188,11 @@ export function ChatFab() {
       </Sheet>
 
       {/* Confirmação da alteração proposta pela IA (modo perguntar) */}
-      {acaoPendente && popupAberto && (
+      {popup && (
         <ConfirmacaoAcao
-          acao={acaoPendente}
-          onConfirmar={(dados) => aplicarAcao(acaoPendente, 'confirmado', dados)}
-          onCancelar={() => setPopupAberto(false)}
+          acao={popup.acao}
+          onConfirmar={(dados) => aplicarAcao(popup.acao, 'confirmado', dados, popup.indice)}
+          onCancelar={() => setPopup(null)}
         />
       )}
 

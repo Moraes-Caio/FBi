@@ -192,6 +192,23 @@ ${REGRAS_RESPOSTA}`
     prompt += bloco('Com quem você está falando', `${ctx.usuario.nome}, responsável pelo restaurante.`)
   }
 
+  // Mensagem que o dono citou ao responder
+  if (ctx.citacao?.texto) {
+    const autor = ctx.citacao.autor === 'user' ? 'o próprio dono' : 'você (assistente)'
+    prompt += bloco(
+      'Mensagem que o dono está respondendo',
+      [
+        `Escrita por: ${autor}`,
+        '"""',
+        String(ctx.citacao.texto),
+        '"""',
+        '',
+        'A mensagem dele se refere a este trecho. Responda considerando esse contexto,',
+        'sem pedir que ele repita o que já está aqui.',
+      ].join('\n'),
+    )
+  }
+
   // Arquivos que o dono anexou nesta mensagem (PDF ou texto)
   if (ctx.arquivos?.length) {
     const limitePorArquivo = Math.floor(20000 / ctx.arquivos.length)
@@ -451,6 +468,34 @@ Responda APENAS com este JSON:
 
 Se ele não disser a prioridade, use IMPORTANTE. Se não disser a categoria, escolha a mais provável.
 Escreva em português do Brasil. Nunca devolva campos vazios.`
+}
+
+/**
+ * Prompt de propósito único para atualizar um dado do perfil. Mesma ideia do
+ * montar-criação: o detector geral erra por excesso de regras, este só decide
+ * campo + valor.
+ */
+export function construirSystemPromptMontarConfig(
+  mensagemUsuario: string,
+  configAtual: Record<string, unknown>,
+  campos: string[],
+) {
+  return `O dono do restaurante disse algo que pode mudar um dado do perfil dele.
+
+Campos possíveis (chave = significado):
+${campos.join('\n')}
+
+Valores atuais: ${JSON.stringify(configAtual)}
+
+Frase dele: "${mensagemUsuario}"
+
+Responda APENAS com este JSON:
+{ "campo": "<chave exata da lista, ou null>", "valor": "<novo valor como texto>" }
+
+Devolva o campo quando ele informar ou mandar mudar um valor (ex: "agora são 30 mesas",
+"muda o horário para 10h às 23h", "meu nome é Breno", "somos uma pizzaria").
+Devolva { "campo": null, "valor": "" } se ele só fez uma pergunta, ou se o valor for
+igual ao atual, ou se nada na frase corresponder a um desses campos.`
 }
 
 /** Extrai fatos duradouros da conversa para a memória de longo prazo. */

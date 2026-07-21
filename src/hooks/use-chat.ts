@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { enviarMensagem, enviarMensagemComFontes, ChatMessage, FonteWeb } from '@/lib/openrouter'
 import {
-  construirSystemPromptChef, construirSystemPromptAgente, construirSystemPromptMontarCriacao,
+  construirSystemPromptChef, construirSystemPromptAgente, construirSystemPromptMontarCriacao, construirSystemPromptMontarConfig,
   MARCADOR_BUSCA, MARCADOR_LEITURA,
 } from '@/lib/prompts-sistema'
 import { memorizarDaConversa, FatoMemoria } from '@/lib/queries/memoria-assistente'
@@ -32,6 +32,8 @@ export interface MensagemChat {
   fontes?: FonteWeb[]
   /** Alterações aplicadas a partir desta resposta (marca de "feito") */
   registros?: { id: string; descricao: string }[]
+  /** Alteração proposta por esta resposta, aguardando o dono confirmar */
+  proposta?: AcaoAgente | null
 }
 
 export interface ResultadoEnvio {
@@ -144,6 +146,10 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
           const montada = await montarCriacao(alvo, textoUsuario)
           if (montada) return { acao: montada, formulario: null }
         }
+        if (mencionaCampoDeConfig(textoUsuario)) {
+          const cfg = await montarConfig(textoUsuario, ctx.configAtual || {})
+          if (cfg) return { acao: cfg, formulario: null }
+        }
       }
 
       return { acao, formulario }
@@ -159,6 +165,44 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     if (/insight/.test(t)) return 'insight'
     if (/a[çc][ãa]o|tarefa/.test(t)) return 'acao'
     return null
+  }
+
+  /** Palavras que indicam um dado do perfil, para só então chamar a IA. */
+  const mencionaCampoDeConfig = (texto: string): boolean =>
+    /(mesa|mesas|lugar|lugares|capacidade|funcion|equipe|hor[áa]rio|abre|fecha|nome|chamo|chama|cozinha|culin[áa]ria|ticket|pre[çc]o m[ée]dio|p[úu]blico|prato|pratos|carro-chefe|diferencial|diferenciais|desafio|endere[çc]o|bairro|fica em|estilo|abri em|desde)/i.test(
+      texto,
+    )
+
+  const montarConfig = async (
+    textoUsuario: string,
+    configAtual: Record<string, unknown>,
+  ): Promise<AcaoAgente | null> => {
+    try {
+      const res = await enviarMensagem(
+        [
+          {
+            role: 'system',
+            content: construirSystemPromptMontarConfig(
+              textoUsuario,
+              configAtual,
+              Object.entries(CAMPOS_CONFIG).map(([k, v]) => `- ${k} = ${v}`),
+            ),
+          },
+          { role: 'user', content: 'Responda no formato JSON pedido.' },
+        ],
+        { response_format: { type: 'json_object' }, temperature: 0, max_tokens: 200 },
+      )
+      const d = typeof res === 'string' ? JSON.parse(res) : (res as any)
+      if (!d?.campo || !String(d.valor ?? '').trim()) return null
+      const acaoCfg: AcaoAgente = {
+        tipo: 'atualizar_config',
+        dados: { campo: d.campo, valor: String(d.valor).trim() },
+        descricao: `Atualizar ${CAMPOS_CONFIG[d.campo] || d.campo} para "${String(d.valor).trim()}"`,
+      }
+      return validarAcao(acaoCfg) ? null : acaoCfg
+    } catch {
+      return null
+    }
   }
 
   const montarCriacao = async (
@@ -447,6 +491,29 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
   const removerUltimaMensagem = useCallback(() => aplicar((prev) => prev.slice(0, -1)), [aplicar])
 
+  /** Prende a proposta à última resposta da IA (o botão vive com a mensagem). */
+  const anexarProposta = useCallback(
+    (proposta: AcaoAgente | null) =>
+      aplicar((prev) => {
+        const copia = [...prev]
+        for (let i = copia.length - 1; i >= 0; i--) {
+          if (copia[i].role === 'assistant') {
+            copia[i] = { ...copia[i], proposta }
+            break
+          }
+        }
+        return copia
+      }),
+    [aplicar],
+  )
+
+  /** Tira a proposta de uma mensagem (já aplicada ou descartada). */
+  const limparProposta = useCallback(
+    (indice: number) =>
+      aplicar((prev) => prev.map((m, i) => (i === indice ? { ...m, proposta: null } : m))),
+    [aplicar],
+  )
+
   /** Prende a marca de "feito" à última resposta da IA. */
   const anexarRegistro = useCallback(
     (registro: { id: string; descricao: string }) =>
@@ -478,6 +545,8 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     enviar,
     adicionarMensagemUsuario,
     removerUltimaMensagem,
+    anexarProposta,
+    limparProposta,
     anexarRegistro,
     removerRegistro,
     carregarHistorico,
