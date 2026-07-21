@@ -52,7 +52,7 @@ import {
   ACOES_DESTRUTIVAS, executarAcao, reverterAcao,
 } from '@/lib/queries/agente-ia'
 import { ConfirmacaoAcao } from '@/components/chat/ConfirmacaoAcao'
-import { FormularioIA } from '@/components/chat/FormularioIA'
+import { FormularioInline } from '@/components/chat/FormularioInline'
 import { VisualizadorAnexo, AnexoVisivel } from '@/components/chat/VisualizadorAnexo'
 import { extrairTextoDePdf } from '@/lib/queries/conhecimento'
 import { buscarMemoria, FatoMemoria } from '@/lib/queries/memoria-assistente'
@@ -174,7 +174,13 @@ function Fontes({ fontes }: { fontes: { url: string; titulo: string }[] }) {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function ChatFab() {
+export function ChatFab({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}) {
   const { pathname } = useLocation()
   const { user, usuario } = useAuth()
   const { mascote, refetch: refetchConfig } = useRestauranteConfig()
@@ -189,7 +195,6 @@ export function ChatFab() {
     carregarHistorico, novaConversa, mudarSessao,
   } = useChat('global')
 
-  const [open, setOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [view, setView] = useState<'chat' | 'history'>('chat')
   const [sessoes, setSessoes] = useState<SessaoItem[]>([])
@@ -256,10 +261,10 @@ export function ChatFab() {
   }, [renamingId])
 
   useEffect(() => {
-    const handler = () => setOpen(true)
+    const handler = () => onOpenChange(true)
     document.addEventListener('open-ai-chat', handler)
     return () => document.removeEventListener('open-ai-chat', handler)
-  }, [])
+  }, [onOpenChange])
 
   // ── History fetch ──────────────────────────────────────────────────────────
 
@@ -731,7 +736,7 @@ export function ChatFab() {
   return (
     <>
       {/* modal={false}: o chat fica aberto sem escurecer nem travar o resto do app */}
-      <Sheet open={open} onOpenChange={setOpen} modal={false}>
+      <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
         <SheetTrigger asChild>
           <Button
             size="icon"
@@ -1131,8 +1136,21 @@ export function ChatFab() {
                   </div>
                 )}
 
-                {/* Input área */}
-                <div className="flex items-end gap-2 relative">
+                {formularioPendente ? (
+                  <FormularioInline
+                    formulario={formularioPendente}
+                    onEnviar={responderFormulario}
+                    onCancelar={() => setFormularioPendente(null)}
+                  />
+                ) : (
+                <>
+                {/* Compositor: texto ocupa a largura toda, botões na barra de baixo */}
+                <div
+                  className={cn(
+                    'rounded-xl border bg-white transition-colors',
+                    loading ? 'border-gray-200' : 'border-gray-200 focus-within:border-blue-300 focus-within:ring-2 focus-within:ring-blue-100',
+                  )}
+                >
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -1141,35 +1159,9 @@ export function ChatFab() {
                     className="hidden"
                     onChange={handleImageSelect}
                   />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={loading}
-                    title="Anexar imagens, PDFs ou textos"
-                    className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:text-[#1D4ED8] hover:border-blue-300 hover:bg-blue-50 transition-colors disabled:opacity-40"
-                  >
-                    <ImageIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={alternarModo}
-                    disabled={loading}
-                    title={
-                      modoAcao === 'automatico'
-                        ? 'A IA aplica as alterações sozinha. Clique para ela perguntar antes.'
-                        : 'A IA pergunta antes de alterar. Clique para ela fazer sozinha.'
-                    }
-                    className={cn(
-                      'h-9 shrink-0 flex items-center gap-1.5 px-2 rounded-md text-[11px] font-medium transition-colors disabled:opacity-40',
-                      modoAcao === 'automatico'
-                        ? 'text-amber-600 hover:bg-amber-50'
-                        : 'text-gray-500 hover:bg-gray-100',
-                    )}
-                  >
-                    {modoAcao === 'automatico' ? <Zap className="h-3.5 w-3.5" /> : <HelpCircle className="h-3.5 w-3.5" />}
-                    {modoAcao === 'automatico' ? 'Fazer sozinha' : 'Perguntar antes'}
-                  </button>
                   <Textarea
                     placeholder={`Pergunte ao ${mascoteNome}...`}
-                    className="min-h-[60px] max-h-[120px] resize-none pr-12 rounded-xl text-sm"
+                    className="min-h-[52px] max-h-[120px] resize-none border-0 bg-transparent px-3 pt-2.5 pb-0 text-sm shadow-none focus-visible:ring-0"
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={(e) => {
@@ -1180,15 +1172,46 @@ export function ChatFab() {
                     }}
                     disabled={loading}
                   />
-                  <Button
-                    size="icon"
-                    className="absolute right-2 bottom-2 h-8 w-8 bg-[#1D4ED8] hover:bg-blue-800 text-white rounded-lg disabled:opacity-50"
-                    onClick={() => handleSend(message)}
-                    disabled={(!message.trim() && !anexos.length) || loading || enviandoImagem}
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={loading}
+                      title="Anexar imagens, PDFs ou textos"
+                      className="h-7 w-7 shrink-0 flex items-center justify-center rounded-md text-gray-400 hover:text-[#1D4ED8] hover:bg-blue-50 transition-colors disabled:opacity-40"
+                    >
+                      <ImageIcon className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={alternarModo}
+                      disabled={loading}
+                      title={
+                        modoAcao === 'automatico'
+                          ? 'A IA aplica as alterações sozinha. Clique para ela perguntar antes.'
+                          : 'A IA pergunta antes de alterar. Clique para ela fazer sozinha.'
+                      }
+                      className={cn(
+                        'h-7 flex items-center gap-1 px-1.5 rounded-md text-[11px] font-medium transition-colors disabled:opacity-40',
+                        modoAcao === 'automatico'
+                          ? 'text-amber-600 hover:bg-amber-50'
+                          : 'text-gray-500 hover:bg-gray-100',
+                      )}
+                    >
+                      {modoAcao === 'automatico' ? <Zap className="h-3.5 w-3.5" /> : <HelpCircle className="h-3.5 w-3.5" />}
+                      {modoAcao === 'automatico' ? 'Fazer sozinha' : 'Perguntar antes'}
+                    </button>
+                    <div className="flex-1" />
+                    <Button
+                      size="icon"
+                      className="h-7 w-7 bg-[#1D4ED8] hover:bg-blue-800 text-white rounded-md disabled:opacity-40"
+                      onClick={() => handleSend(message)}
+                      disabled={(!message.trim() && !anexos.length) || loading || enviandoImagem}
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
+                </>
+                )}
               </div>
             </>
           )}
@@ -1201,15 +1224,6 @@ export function ChatFab() {
           acao={popup.acao}
           onConfirmar={(dados) => aplicarAcao(popup.acao, 'confirmado', dados, popup.uid)}
           onCancelar={() => setPopup(null)}
-        />
-      )}
-
-      {/* Perguntas que a IA faz antes de agir */}
-      {formularioPendente && (
-        <FormularioIA
-          formulario={formularioPendente}
-          onEnviar={responderFormulario}
-          onCancelar={() => setFormularioPendente(null)}
         />
       )}
 

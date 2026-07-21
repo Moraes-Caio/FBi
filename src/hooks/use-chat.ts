@@ -138,7 +138,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
         obj?.formulario?.campos?.length
           ? {
               titulo: String(obj.formulario.titulo || 'Preciso de mais alguns dados'),
-              campos: obj.formulario.campos.slice(0, 3),
+              campos: obj.formulario.campos.slice(0, 2),
               acao_pretendida: obj.formulario.acao_pretendida,
             }
           : null
