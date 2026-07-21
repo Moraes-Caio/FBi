@@ -42,25 +42,39 @@ export async function atualizarCampoConfig(
 ): Promise<void> {
   const v = valor.trim()
 
+  // O update precisa devolver a linha: sem isso, uma falha de permissão (RLS)
+  // ou um id errado passariam em silêncio e a IA diria que salvou sem ter salvo.
+  const gravar = async (campos: Record<string, unknown>) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from('restaurantes')
+      .update(campos)
+      .eq('id', restauranteId)
+      .select('id')
+    if (error) throw new Error(error.message)
+    if (!data || data.length === 0) {
+      throw new Error('Nada foi alterado — verifique se você tem permissão para editar este restaurante.')
+    }
+  }
+
   if (campo === 'numero_mesas') {
     const n = parseInt(v.replace(/\D/g, ''), 10)
-    await supabase.from('restaurantes').update({ numero_mesas: Number.isFinite(n) ? n : null }).eq('id', restauranteId)
+    await gravar({ numero_mesas: Number.isFinite(n) ? n : null })
     return
   }
 
   if (COLUNAS_TEXTO.has(campo)) {
-    // coluna definida em tempo de execução: fora do alcance dos tipos gerados
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any).from('restaurantes').update({ [campo]: v || null }).eq('id', restauranteId)
+    await gravar({ [campo]: v || null })
     return
   }
 
   if (CAMPOS_JSON.has(campo)) {
     // merge: preserva os outros campos do jsonb
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('restaurantes').select('perfil_restaurante').eq('id', restauranteId).single()
+    if (error) throw new Error(error.message)
     const perfil = { ...((data?.perfil_restaurante as any) || {}), [campo]: v }
-    await supabase.from('restaurantes').update({ perfil_restaurante: perfil }).eq('id', restauranteId)
+    await gravar({ perfil_restaurante: perfil })
     return
   }
 

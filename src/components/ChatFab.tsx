@@ -16,7 +16,8 @@ import {
   ChevronDown,
   Check,
   FileText,
-  Undo2,
+  Zap,
+  HelpCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -193,7 +194,8 @@ export function ChatFab() {
   // Fluxo do agente
   const [acaoPendente, setAcaoPendente] = useState<AcaoAgente | null>(null)
   const [formularioPendente, setFormularioPendente] = useState<(TipoFormulario & { acao_pretendida?: string }) | null>(null)
-  const [ultimoRegistro, setUltimoRegistro] = useState<RegistroAcao | null>(null)
+  // Ações já aplicadas nesta conversa: ficam marcadas abaixo do chat
+  const [registrosFeitos, setRegistrosFeitos] = useState<RegistroAcao[]>([])
   const [modoAcao, setModoAcao] = useState<'perguntar' | 'automatico'>('perguntar')
   // ref espelha o modo: handleSend captura o state pelo closure e leria o valor
   // antigo na primeira mensagem depois que o modo é carregado do banco
@@ -314,7 +316,6 @@ export function ChatFab() {
     setFailedMessage('')
     setAcaoPendente(null)
     setFormularioPendente(null)
-    setUltimoRegistro(null)
     setAnexos([])
   }
 
@@ -552,7 +553,6 @@ export function ChatFab() {
     setFailedMessage('')
     setAcaoPendente(null)
     setFormularioPendente(null)
-    setUltimoRegistro(null)
 
     // A mensagem aparece na hora — buscar contexto e chamar a IA vem depois
     adicionarMensagemUsuario(msgTexto, anexosMsg.length ? anexosMsg : undefined)
@@ -588,16 +588,21 @@ export function ChatFab() {
   }
 
   /** Executa a alteração e guarda o registro para permitir desfazer. */
-  const aplicarAcao = async (acao: AcaoAgente, modo: 'automatico' | 'confirmado') => {
+  const aplicarAcao = async (
+    acao: AcaoAgente,
+    modo: 'automatico' | 'confirmado',
+    dadosEditados?: Record<string, any>,
+  ) => {
     if (!usuario?.restaurante_id) return
+    const final: AcaoAgente = dadosEditados ? { ...acao, dados: dadosEditados } : acao
     try {
-      const registro = await executarAcao(usuario.restaurante_id, acao, modo)
-      setUltimoRegistro(registro)
+      const registro = await executarAcao(usuario.restaurante_id, final, modo)
+      if (registro) setRegistrosFeitos((p) => [...p, registro])
       setAcaoPendente(null)
       refetchConfig()
       toast({
         title: modo === 'automatico' ? 'Feito pela IA' : 'Alteração aplicada',
-        description: acao.descricao,
+        description: final.descricao,
       })
     } catch (e: any) {
       toast({ title: 'Não consegui aplicar', description: e.message, variant: 'destructive' })
@@ -605,16 +610,35 @@ export function ChatFab() {
     }
   }
 
-  const desfazer = async () => {
-    if (!ultimoRegistro) return
+  const desfazer = async (registro: RegistroAcao) => {
     try {
-      await reverterAcao(ultimoRegistro)
-      setUltimoRegistro(null)
+      await reverterAcao(registro)
+      setRegistrosFeitos((p) => p.filter((r) => r.id !== registro.id))
       refetchConfig()
-      toast({ title: 'Desfeito', description: 'O valor anterior foi restaurado.' })
+      toast({ title: 'Desfeito', description: 'O estado anterior foi restaurado.' })
     } catch (e: any) {
       toast({ title: 'Não consegui desfazer', description: e.message, variant: 'destructive' })
     }
+  }
+
+  /** Só tira a marca da tela — a alteração continua valendo no sistema. */
+  const ocultarRegistro = (id: string) =>
+    setRegistrosFeitos((p) => p.filter((r) => r.id !== id))
+
+  const alternarModo = async () => {
+    const novo = modoAcaoRef.current === 'automatico' ? 'perguntar' : 'automatico'
+    modoAcaoRef.current = novo
+    setModoAcao(novo)
+    if (usuario?.restaurante_id) {
+      await supabase.from('restaurantes').update({ ia_modo_acao: novo }).eq('id', usuario.restaurante_id)
+    }
+    toast({
+      title: novo === 'automatico' ? 'A IA vai fazer sozinha' : 'A IA vai perguntar antes',
+      description:
+        novo === 'automatico'
+          ? 'Alterações são aplicadas na hora, com opção de desfazer. Excluir sempre pergunta.'
+          : 'Toda alteração abre uma confirmação que você pode editar.',
+    })
   }
 
   /** Respostas do formulário voltam como mensagem, para a IA agir com os dados. */
@@ -678,6 +702,23 @@ export function ChatFab() {
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
+                    <button
+                      onClick={alternarModo}
+                      title={
+                        modoAcao === 'automatico'
+                          ? 'A IA faz sozinha (clique para ela perguntar antes)'
+                          : 'A IA pergunta antes (clique para ela fazer sozinha)'
+                      }
+                      className={cn(
+                        'flex items-center gap-1 h-8 px-2 rounded-full text-[10px] font-semibold transition-colors',
+                        modoAcao === 'automatico'
+                          ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
+                      )}
+                    >
+                      {modoAcao === 'automatico' ? <Zap className="h-3 w-3" /> : <HelpCircle className="h-3 w-3" />}
+                      {modoAcao === 'automatico' ? 'Automático' : 'Perguntar'}
+                    </button>
                     <button onClick={handleOpenHistory} title="Histórico" className="h-8 w-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500">
                       <History className="h-4 w-4" />
                     </button>
@@ -858,20 +899,6 @@ export function ChatFab() {
                           {!!msg.fontes?.length && <Fontes fontes={msg.fontes} />}
                         </div>
                       </div>
-                      {isLast && msg.role === 'assistant' && ultimoRegistro && !loading && (
-                        <div className="flex w-full justify-start pl-2 items-center gap-2">
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-1">
-                            <Check className="h-3 w-3" /> {ultimoRegistro.descricao}
-                          </span>
-                          <Button
-                            size="sm" variant="ghost"
-                            className="text-[11px] h-7 rounded-full text-gray-500 hover:text-gray-800"
-                            onClick={desfazer}
-                          >
-                            <Undo2 className="h-3 w-3 mr-1" /> Desfazer
-                          </Button>
-                        </div>
-                      )}
                     </div>
                   )
                 })}
@@ -924,6 +951,34 @@ export function ChatFab() {
                 </div>
 
                 {/* Preview de imagem */}
+                {registrosFeitos.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    {registrosFeitos.map((r) => (
+                      <div
+                        key={r.id}
+                        className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5"
+                      >
+                        <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                        <span className="text-[11px] text-emerald-900 flex-1 leading-snug">{r.descricao}</span>
+                        <button
+                          onClick={() => desfazer(r)}
+                          className="text-[11px] font-medium text-emerald-700 hover:text-emerald-900 shrink-0"
+                          title="Reverter a alteração no sistema"
+                        >
+                          Desfazer
+                        </button>
+                        <button
+                          onClick={() => ocultarRegistro(r.id)}
+                          className="h-4 w-4 rounded-full text-emerald-600 hover:bg-emerald-200 flex items-center justify-center shrink-0"
+                          title="Só tirar este aviso (a alteração continua valendo)"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {anexos.length > 0 && (
                   <div className="flex flex-wrap gap-2">
                     {anexos.map((a) => (
@@ -1011,7 +1066,7 @@ export function ChatFab() {
       {acaoPendente && (
         <ConfirmacaoAcao
           acao={acaoPendente}
-          onConfirmar={() => aplicarAcao(acaoPendente, 'confirmado')}
+          onConfirmar={(dados) => aplicarAcao(acaoPendente, 'confirmado', dados)}
           onCancelar={() => setAcaoPendente(null)}
         />
       )}

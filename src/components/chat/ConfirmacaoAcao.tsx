@@ -1,10 +1,14 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog'
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { AlertTriangle, Loader2, Pencil } from 'lucide-react'
 import { AcaoAgente, ACOES_DESTRUTIVAS, CAMPOS_CONFIG } from '@/lib/queries/agente-ia'
+import { cn } from '@/lib/utils'
 
 const ROTULO_TIPO: Record<string, string> = {
   criar_acao: 'Criar ação',
@@ -18,35 +22,26 @@ const ROTULO_TIPO: Record<string, string> = {
   excluir_anotacao: 'Apagar anotação',
 }
 
-/** Mostra os dados da alteração de forma legível, sem JSON cru. */
-function Detalhes({ acao }: { acao: AcaoAgente }) {
-  const d = acao.dados || {}
-
-  if (acao.tipo === 'atualizar_config') {
-    return (
-      <div className="rounded-lg border bg-muted/40 p-3 text-sm">
-        <p className="text-xs text-muted-foreground">{CAMPOS_CONFIG[d.campo] || d.campo}</p>
-        <p className="font-medium text-foreground mt-0.5">{String(d.valor)}</p>
-      </div>
-    )
-  }
-
-  const linhas = Object.entries(d).filter(([k, v]) => k !== 'id' && String(v ?? '').trim())
-  if (!linhas.length) return null
-
-  return (
-    <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
-      {linhas.map(([k, v]) => (
-        <div key={k}>
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            {k.replace(/_/g, ' ')}
-          </p>
-          <p className="text-sm text-foreground whitespace-pre-wrap">{String(v)}</p>
-        </div>
-      ))}
-    </div>
-  )
+const ROTULO_CAMPO: Record<string, string> = {
+  titulo_acao: 'Título',
+  plano_detalhado: 'Plano',
+  prioridade: 'Prioridade',
+  categoria: 'Categoria',
+  status: 'Situação',
+  titulo: 'Título',
+  descricao: 'Descrição',
+  sugestao: 'Sugestão',
+  fato: 'O que guardar',
+  valor: 'Novo valor',
 }
+
+const OPCOES: Record<string, string[]> = {
+  prioridade: ['URGENTE', 'IMPORTANTE', 'OBSERVACAO'],
+  status: ['SUGERIDA', 'PENDENTE', 'EM_ANDAMENTO', 'CONCLUIDO'],
+}
+
+/** Campos longos ganham textarea. */
+const LONGOS = new Set(['plano_detalhado', 'descricao', 'sugestao', 'fato'])
 
 export function ConfirmacaoAcao({
   acao,
@@ -54,24 +49,36 @@ export function ConfirmacaoAcao({
   onCancelar,
 }: {
   acao: AcaoAgente
-  onConfirmar: () => Promise<void>
+  /** Recebe os dados possivelmente editados pelo dono. */
+  onConfirmar: (dados: Record<string, any>) => Promise<void>
   onCancelar: () => void
 }) {
+  const [dados, setDados] = useState<Record<string, any>>({ ...(acao.dados || {}) })
   const [salvando, setSalvando] = useState(false)
   const destrutiva = ACOES_DESTRUTIVAS.includes(acao.tipo)
+
+  const set = (k: string, v: string) => setDados((p) => ({ ...p, [k]: v }))
+
+  // id nunca é editável; nas exclusões não há o que ajustar
+  const editaveis = Object.keys(dados).filter((k) => k !== 'id' && k !== 'campo')
 
   const confirmar = async () => {
     setSalvando(true)
     try {
-      await onConfirmar()
+      await onConfirmar(dados)
     } finally {
       setSalvando(false)
     }
   }
 
+  const rotulo = (k: string) =>
+    acao.tipo === 'atualizar_config' && k === 'valor'
+      ? CAMPOS_CONFIG[dados.campo] || 'Novo valor'
+      : ROTULO_CAMPO[k] || k.replace(/_/g, ' ')
+
   return (
     <Dialog open onOpenChange={(o) => { if (!o && !salvando) onCancelar() }}>
-      <DialogContent className="sm:max-w-[440px]">
+      <DialogContent className="sm:max-w-[460px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {destrutiva && <AlertTriangle className="h-4 w-4 text-rose-500" />}
@@ -80,7 +87,53 @@ export function ConfirmacaoAcao({
           <DialogDescription>{acao.descricao}</DialogDescription>
         </DialogHeader>
 
-        <Detalhes acao={acao} />
+        {!destrutiva && editaveis.length > 0 && (
+          <>
+            <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground -mb-1">
+              <Pencil className="h-3 w-3" /> Você pode ajustar antes de confirmar
+            </p>
+            <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+              {editaveis.map((k) => (
+                <div key={k} className="space-y-1.5">
+                  <Label className="text-xs">{rotulo(k)}</Label>
+
+                  {OPCOES[k] ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {OPCOES[k].map((o) => (
+                        <button
+                          key={o}
+                          type="button"
+                          onClick={() => set(k, o)}
+                          className={cn(
+                            'px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors',
+                            String(dados[k]).toUpperCase() === o
+                              ? 'bg-primary text-white border-primary'
+                              : 'bg-white text-muted-foreground border-gray-200 hover:border-primary/40',
+                          )}
+                        >
+                          {o}
+                        </button>
+                      ))}
+                    </div>
+                  ) : LONGOS.has(k) ? (
+                    <Textarea
+                      rows={3}
+                      className="resize-none text-sm"
+                      value={String(dados[k] ?? '')}
+                      onChange={(e) => set(k, e.target.value)}
+                    />
+                  ) : (
+                    <Input
+                      className="text-sm"
+                      value={String(dados[k] ?? '')}
+                      onChange={(e) => set(k, e.target.value)}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         {destrutiva && (
           <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">
