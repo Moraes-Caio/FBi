@@ -59,9 +59,9 @@ export function TaskModal({ open, onOpenChange, insight, task, onSave, onDelete 
         setDate(task.date)
         setSource(task.source)
       } else if (insight) {
-        setTitle(`Verificar: ${insight.titulo || insight.title || 'Insight'}`)
+        setTitle(`Verificar: ${insight.title || 'Insight'}`)
         setPriority('IMPORTANTE')
-        setSource(`Insight: ${insight.categoria || insight.category || 'Geral'}`)
+        setSource(`Insight: ${insight.category || 'Geral'}`)
         setResponsible('')
         setDate('')
       } else {

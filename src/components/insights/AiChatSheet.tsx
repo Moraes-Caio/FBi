@@ -114,11 +114,11 @@ export function AiChatSheet({ open, onOpenChange, insight }: AiChatSheetProps) {
             .single()
 
           let feedbacks = []
-          if (insight.categoria) {
+          if (insight.category) {
             const { data } = await supabase
               .from('feedbacks_restaurante')
               .select('*')
-              .eq('categoria', insight.categoria)
+              .eq('categoria', insight.category)
               .order('created_at', { ascending: false })
               .limit(30)
             if (data) feedbacks = data
@@ -161,7 +161,7 @@ export function AiChatSheet({ open, onOpenChange, insight }: AiChatSheetProps) {
         titulo_acao: dados?.titulo || insight?.title || 'Nova Ação',
         prioridade: dados?.prioridade || insight?.priority || 'IMPORTANTE',
         status: 'PENDENTE',
-        categoria: insight?.categoria,
+        categoria: insight?.category,
         texto: dados?.descricao || insight?.description,
       })
       if (err) throw err
@@ -176,7 +176,7 @@ export function AiChatSheet({ open, onOpenChange, insight }: AiChatSheetProps) {
       const { error: err } = await supabase.from('insights').insert({
         titulo: dados?.titulo || 'Novo Insight',
         prioridade: dados?.prioridade || 'OBSERVACAO',
-        categoria: insight?.categoria,
+        categoria: insight?.category,
         descricao: dados?.descricao,
         gerado_por: 'manual',
       })

@@ -195,7 +195,7 @@ export async function executarAcao(
         sugestao: String(d.sugestao ?? '').trim(),
         prioridade: normalizarPrioridade(d.prioridade),
         categoria: String(d.categoria ?? 'Geral'),
-        gerado_por: 'ia_chat',
+        gerado_por: 'ia', // CHECK aceita apenas 'ia' ou 'manual'
         ativo: true,
       }
       const { data, error } = await db.from('insights').insert(linha).select().single()

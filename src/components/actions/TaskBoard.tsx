@@ -38,7 +38,6 @@ export type ExtendedActionTask = {
   texto?: string
   feedback_id?: number | null
   restaurante_id?: number | null
-  client_id?: string | null
   created_at?: string
   ordem: number
   responsible?: string
@@ -103,7 +102,7 @@ export function TaskBoard({ refreshTrigger = 0 }: TaskBoardProps) {
   const [editingTask, setEditingTask] = useState<ExtendedActionTask | null>(null)
   const [activeColumn, setActiveColumn] = useState<ActionStatus>('PENDENTE')
 
-  const undoTimers = useRef<Record<string, NodeJS.Timeout>>({})
+  const undoTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [undoableTasks, setUndoableTasks] = useState<Record<string, ActionStatus>>({})
 
   const sensors = useSensors(
@@ -129,7 +128,6 @@ export function TaskBoard({ refreshTrigger = 0 }: TaskBoardProps) {
           texto: d.texto || undefined,
           feedback_id: d.feedback_id,
           restaurante_id: d.restaurante_id,
-          client_id: d.client_id,
           created_at: d.created_at,
           responsible: 'Equipe',
           date: new Date(d.created_at).toLocaleDateString(),

@@ -4,7 +4,7 @@ export async function buscarAcoes(restauranteId: number, apenasAprovadas = true)
   const { data, error } = await supabase
     .from('acoes_operacionais')
     .select(
-      'id, titulo_acao, plano_detalhado, status, prioridade, categoria, texto, feedback_id, restaurante_id, client_id, created_at, ordem',
+      'id, titulo_acao, plano_detalhado, status, prioridade, categoria, texto, feedback_id, restaurante_id, created_at, ordem',
     )
     .eq('restaurante_id', restauranteId)
     .in('status', apenasAprovadas ? ['PENDENTE', 'EM_ANDAMENTO', 'CONCLUIDO'] : ['SUGERIDA'])

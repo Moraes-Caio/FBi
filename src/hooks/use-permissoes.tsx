@@ -42,7 +42,7 @@ export function usePermissoes(): UsePermissoesReturn {
         .single()
 
       if (data?.funcoes_config) {
-        const lista = data.funcoes_config as Funcao[]
+        const lista = data.funcoes_config as unknown as Funcao[]
         const found = lista.find((f) => f.id === funcaoId) ?? null
         setFuncao(found)
       }

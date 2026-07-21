@@ -181,7 +181,7 @@ export default function HomePage() {
                   axisLine={false}
                   tick={{ fill: 'hsl(var(--muted-foreground))' }}
                 />
-                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartTooltip content={<ChartTooltipContent payload={[]} />} />
                 <Line
                   type="monotone"
                   dataKey="avaliacoes"

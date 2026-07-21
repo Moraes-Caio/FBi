@@ -336,7 +336,9 @@ export async function gerarPdfRelatorio(
   }
 
   // ── Rodapé em todas as páginas ───────────────────────────────────────────
-  const paginas = doc.internal.getNumberOfPages()
+    // getNumberOfPages existe em runtime; a tipagem do jsPDF não a declara
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const paginas = (doc.internal as any).getNumberOfPages()
   for (let i = 1; i <= paginas; i++) {
     doc.setPage(i)
     doc.setDrawColor(LINHA[0], LINHA[1], LINHA[2])

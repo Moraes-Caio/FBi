@@ -195,6 +195,9 @@ export function ChatFab() {
   const [formularioPendente, setFormularioPendente] = useState<(TipoFormulario & { acao_pretendida?: string }) | null>(null)
   const [ultimoRegistro, setUltimoRegistro] = useState<RegistroAcao | null>(null)
   const [modoAcao, setModoAcao] = useState<'perguntar' | 'automatico'>('perguntar')
+  // ref espelha o modo: handleSend captura o state pelo closure e leria o valor
+  // antigo na primeira mensagem depois que o modo é carregado do banco
+  const modoAcaoRef = useRef<'perguntar' | 'automatico'>('perguntar')
 
   useEffect(() => {
     if (open && user) carregarHistorico(sessaoId)
@@ -466,12 +469,15 @@ export function ChatFab() {
               .order('created_at', { ascending: false })
               .limit(25)
           : vazio,
+        // o id é obrigatório: sem ele o agente não consegue editar nem excluir
         rId
-          ? supabase.from('insights').select('titulo, descricao, prioridade')
+          ? supabase.from('insights').select('id, titulo, descricao, prioridade, categoria')
               .eq('ativo', true).eq('restaurante_id', rId).limit(10)
           : vazio,
         rId
-          ? supabase.from('acoes_operacionais').select('titulo_acao, status')
+          ? supabase.from('acoes_operacionais')
+              .select('id, titulo_acao, status, prioridade, categoria')
+              .eq('restaurante_id', rId) // antes buscava de todos os restaurantes
               .neq('status', 'CONCLUIDO').limit(10)
           : vazio,
         rId ? supabase.from('garcons').select('nome_garcon').eq('restaurante_id', rId).eq('ativo', true) : vazio,
@@ -487,7 +493,9 @@ export function ChatFab() {
 
     memoriaRef.current = memoria
     if ((configRes.data as any)?.ia_modo_acao) {
-      setModoAcao((configRes.data as any).ia_modo_acao === 'automatico' ? 'automatico' : 'perguntar')
+      const m = (configRes.data as any).ia_modo_acao === 'automatico' ? 'automatico' : 'perguntar'
+      modoAcaoRef.current = m
+      setModoAcao(m)
     }
 
     const cfg = configRes.data as any
@@ -571,7 +579,7 @@ export function ChatFab() {
     } else if (result?.acao) {
       // Excluir nunca roda sozinho, nem no modo automático
       const destrutiva = ACOES_DESTRUTIVAS.includes(result.acao.tipo)
-      if (modoAcao === 'automatico' && !destrutiva) {
+      if (modoAcaoRef.current === 'automatico' && !destrutiva) {
         await aplicarAcao(result.acao, 'automatico')
       } else {
         setAcaoPendente(result.acao)

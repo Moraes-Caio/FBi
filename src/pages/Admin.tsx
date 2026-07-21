@@ -1001,7 +1001,7 @@ const TAB_LABELS: Record<Tab, string> = {
 }
 
 // Form defaults
-const EMPTY_DIVISAO = { nome: '', chave_pix: '', tipo: 'porcentagem' as const, valor: '', ativo: true }
+const EMPTY_DIVISAO = { nome: '', chave_pix: '', tipo: 'porcentagem' as 'porcentagem' | 'valor_fixo', valor: '', ativo: true }
 const EMPTY_AFILIADO = {
   nome: '', email: '', telefone: '', codigo: '',
   comissao_tipo: 'porcentagem' as 'porcentagem' | 'valor_fixo', comissao_valor: '',

@@ -15,6 +15,225 @@ export type Database = {
   }
   public: {
     Tables: {
+      afiliados: {
+        Row: {
+          agencia: string | null
+          ativo: boolean
+          banco: string | null
+          chave_pix: string | null
+          codigo: string
+          codigo_banco: string | null
+          comissao_tipo: string
+          comissao_valor: number
+          conta: string | null
+          cpf_cnpj: string | null
+          created_at: string
+          email: string | null
+          id: string
+          nome: string
+          observacoes: string | null
+          stripe_account_id: string | null
+          telefone: string | null
+          tipo_conta: string | null
+        }
+        Insert: {
+          agencia?: string | null
+          ativo?: boolean
+          banco?: string | null
+          chave_pix?: string | null
+          codigo: string
+          codigo_banco?: string | null
+          comissao_tipo?: string
+          comissao_valor?: number
+          conta?: string | null
+          cpf_cnpj?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          nome: string
+          observacoes?: string | null
+          stripe_account_id?: string | null
+          telefone?: string | null
+          tipo_conta?: string | null
+        }
+        Update: {
+          agencia?: string | null
+          ativo?: boolean
+          banco?: string | null
+          chave_pix?: string | null
+          codigo?: string
+          codigo_banco?: string | null
+          comissao_tipo?: string
+          comissao_valor?: number
+          conta?: string | null
+          cpf_cnpj?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          nome?: string
+          observacoes?: string | null
+          stripe_account_id?: string | null
+          telefone?: string | null
+          tipo_conta?: string | null
+        }
+        Relationships: []
+      }
+      divisao_receita: {
+        Row: {
+          ativo: boolean | null
+          chave_pix: string | null
+          created_at: string | null
+          id: string
+          nome: string
+          tipo: string
+          valor: number
+        }
+        Insert: {
+          ativo?: boolean | null
+          chave_pix?: string | null
+          created_at?: string | null
+          id?: string
+          nome: string
+          tipo: string
+          valor: number
+        }
+        Update: {
+          ativo?: boolean | null
+          chave_pix?: string | null
+          created_at?: string | null
+          id?: string
+          nome?: string
+          tipo?: string
+          valor?: number
+        }
+        Relationships: []
+      }
+      integracao_config: {
+        Row: {
+          chave: string
+          updated_at: string
+          valor: string
+        }
+        Insert: {
+          chave: string
+          updated_at?: string
+          valor: string
+        }
+        Update: {
+          chave?: string
+          updated_at?: string
+          valor?: string
+        }
+        Relationships: []
+      }
+      platform_admins: {
+        Row: {
+          email: string
+        }
+        Insert: {
+          email: string
+        }
+        Update: {
+          email?: string
+        }
+        Relationships: []
+      }
+      reacoes_sugestoes: {
+        Row: {
+          autor: string
+          created_at: string
+          emoji: string
+          id: string
+          mensagem_id: string
+          sugestao_id: string
+        }
+        Insert: {
+          autor: string
+          created_at?: string
+          emoji: string
+          id?: string
+          mensagem_id: string
+          sugestao_id: string
+        }
+        Update: {
+          autor?: string
+          created_at?: string
+          emoji?: string
+          id?: string
+          mensagem_id?: string
+          sugestao_id?: string
+        }
+        Relationships: []
+      }
+      respostas_sugestoes: {
+        Row: {
+          arquivos: Json | null
+          autor: string
+          created_at: string
+          id: string
+          responde_a: string | null
+          sugestao_id: string
+          texto: string
+        }
+        Insert: {
+          arquivos?: Json | null
+          autor?: string
+          created_at?: string
+          id?: string
+          responde_a?: string | null
+          sugestao_id: string
+          texto: string
+        }
+        Update: {
+          arquivos?: Json | null
+          autor?: string
+          created_at?: string
+          id?: string
+          responde_a?: string | null
+          sugestao_id?: string
+          texto?: string
+        }
+        Relationships: []
+      }
+      sugestoes_plataforma: {
+        Row: {
+          admin_leu_em: string | null
+          arquivos: Json
+          cliente_leu_em: string | null
+          created_at: string
+          id: string
+          restaurante_id: number | null
+          status: string
+          texto: string
+          titulo: string | null
+          usuario_id: string | null
+        }
+        Insert: {
+          admin_leu_em?: string | null
+          arquivos?: Json
+          cliente_leu_em?: string | null
+          created_at?: string
+          id?: string
+          restaurante_id?: number | null
+          status?: string
+          texto: string
+          titulo?: string | null
+          usuario_id?: string | null
+        }
+        Update: {
+          admin_leu_em?: string | null
+          arquivos?: Json
+          cliente_leu_em?: string | null
+          created_at?: string
+          id?: string
+          restaurante_id?: number | null
+          status?: string
+          texto?: string
+          titulo?: string | null
+          usuario_id?: string | null
+        }
+        Relationships: []
+      }
       acoes_ia: {
         Row: {
           alvo_id: string | null
@@ -526,6 +745,7 @@ export type Database = {
         Row: {
           ativo: boolean | null
           created_at: string | null
+          garcom_id: number | null
           id: number
           papel_fundo: string | null
           restaurante_id: number
@@ -535,6 +755,7 @@ export type Database = {
         Insert: {
           ativo?: boolean | null
           created_at?: string | null
+          garcom_id?: number | null
           id?: number
           papel_fundo?: string | null
           restaurante_id: number
@@ -544,6 +765,7 @@ export type Database = {
         Update: {
           ativo?: boolean | null
           created_at?: string | null
+          garcom_id?: number | null
           id?: number
           papel_fundo?: string | null
           restaurante_id?: number
@@ -652,6 +874,11 @@ export type Database = {
           metodo_coleta_feedback: string | null
           nome: string | null
           nome_restaurante: string | null
+          qr_bg_imagem: string | null
+          qr_bg_modo: string | null
+          qr_estilo: string | null
+          qr_filtro: string | null
+          qr_mensagem: string | null
           numero_mesas: number | null
           numero_whatsapp: string | null
           onboarding_completo: boolean
@@ -684,6 +911,11 @@ export type Database = {
           metodo_coleta_feedback?: string | null
           nome?: string | null
           nome_restaurante?: string | null
+          qr_bg_imagem?: string | null
+          qr_bg_modo?: string | null
+          qr_estilo?: string | null
+          qr_filtro?: string | null
+          qr_mensagem?: string | null
           numero_mesas?: number | null
           numero_whatsapp?: string | null
           onboarding_completo?: boolean
@@ -716,6 +948,11 @@ export type Database = {
           metodo_coleta_feedback?: string | null
           nome?: string | null
           nome_restaurante?: string | null
+          qr_bg_imagem?: string | null
+          qr_bg_modo?: string | null
+          qr_estilo?: string | null
+          qr_filtro?: string | null
+          qr_mensagem?: string | null
           numero_mesas?: number | null
           numero_whatsapp?: string | null
           onboarding_completo?: boolean

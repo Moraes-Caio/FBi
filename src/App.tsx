@@ -31,7 +31,7 @@ import { RotaPermitida } from './components/RotaPermitida'
 const App = () => (
   <AuthProvider>
     <RestauranteConfigProvider>
-      <BrowserRouter future={{ v7_startTransition: false, v7_relativeSplatPath: false }}>
+      <BrowserRouter>
         <TooltipProvider>
         <Toaster />
         <Sonner />
