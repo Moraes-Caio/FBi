@@ -241,30 +241,6 @@ export function AiChatSheet({ open, onOpenChange, insight }: AiChatSheetProps) {
                       {msg.role === 'user' ? parseInline(msg.text, LINK_ESCURO) : <FormattedMessage content={msg.text} />}
                     </div>
                   </div>
-                  {msg.role === 'assistant' && msg.intent === 'criar_acao' && (
-                    <div className="flex justify-start pl-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs bg-blue-50 text-blue-700 h-8 hover:bg-blue-100"
-                        onClick={() => handleCriarAcao(msg.suggestedData)}
-                      >
-                        <PlusCircle className="w-3 h-3 mr-1" /> Criar Ação
-                      </Button>
-                    </div>
-                  )}
-                  {msg.role === 'assistant' && msg.intent === 'criar_insight' && (
-                    <div className="flex justify-start pl-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs bg-yellow-50 text-yellow-700 h-8 hover:bg-yellow-100"
-                        onClick={() => handleCriarInsight(msg.suggestedData)}
-                      >
-                        <Lightbulb className="w-3 h-3 mr-1" /> Criar Insight
-                      </Button>
-                    </div>
-                  )}
                 </div>
               ))}
 

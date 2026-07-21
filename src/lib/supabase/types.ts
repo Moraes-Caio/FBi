@@ -15,6 +15,147 @@ export type Database = {
   }
   public: {
     Tables: {
+      acoes_ia: {
+        Row: {
+          alvo_id: string | null
+          alvo_tabela: string | null
+          antes: Json | null
+          created_at: string
+          depois: Json | null
+          descricao: string
+          id: string
+          modo: string
+          restaurante_id: number
+          revertido: boolean
+          revertido_em: string | null
+          tipo: string
+        }
+        Insert: {
+          alvo_id?: string | null
+          alvo_tabela?: string | null
+          antes?: Json | null
+          created_at?: string
+          depois?: Json | null
+          descricao: string
+          id?: string
+          modo?: string
+          restaurante_id: number
+          revertido?: boolean
+          revertido_em?: string | null
+          tipo: string
+        }
+        Update: {
+          alvo_id?: string | null
+          alvo_tabela?: string | null
+          antes?: Json | null
+          created_at?: string
+          depois?: Json | null
+          descricao?: string
+          id?: string
+          modo?: string
+          restaurante_id?: number
+          revertido?: boolean
+          revertido_em?: string | null
+          tipo?: string
+        }
+        Relationships: []
+      }
+      memoria_assistente: {
+        Row: {
+          categoria: string
+          created_at: string
+          fato: string
+          id: string
+          restaurante_id: number
+        }
+        Insert: {
+          categoria?: string
+          created_at?: string
+          fato: string
+          id?: string
+          restaurante_id: number
+        }
+        Update: {
+          categoria?: string
+          created_at?: string
+          fato?: string
+          id?: string
+          restaurante_id?: number
+        }
+        Relationships: []
+      }
+      documentos_ia: {
+        Row: {
+          created_at: string
+          descricao: string | null
+          erro: string | null
+          escopo: string
+          id: string
+          origem: string
+          restaurante_id: number | null
+          status: string
+          titulo: string
+          total_trechos: number
+          url: string | null
+        }
+        Insert: {
+          created_at?: string
+          descricao?: string | null
+          erro?: string | null
+          escopo?: string
+          id?: string
+          origem?: string
+          restaurante_id?: number | null
+          status?: string
+          titulo: string
+          total_trechos?: number
+          url?: string | null
+        }
+        Update: {
+          created_at?: string
+          descricao?: string | null
+          erro?: string | null
+          escopo?: string
+          id?: string
+          origem?: string
+          restaurante_id?: number | null
+          status?: string
+          titulo?: string
+          total_trechos?: number
+          url?: string | null
+        }
+        Relationships: []
+      }
+      documento_trechos: {
+        Row: {
+          conteudo: string
+          created_at: string
+          documento_id: string
+          embedding: string | null
+          id: string
+          posicao: number
+          restaurante_id: number | null
+        }
+        Insert: {
+          conteudo: string
+          created_at?: string
+          documento_id: string
+          embedding?: string | null
+          id?: string
+          posicao?: number
+          restaurante_id?: number | null
+        }
+        Update: {
+          conteudo?: string
+          created_at?: string
+          documento_id?: string
+          embedding?: string | null
+          id?: string
+          posicao?: number
+          restaurante_id?: number | null
+        }
+        Relationships: []
+      }
       acoes_operacionais: {
         Row: {
           categoria: string | null
@@ -499,6 +640,8 @@ export type Database = {
           configuracoes: Json | null
           created_at: string
           detalhes: string | null
+          ia_modo_acao: string
+          perfil_restaurante: Json
           é_pagante: boolean | null
           email: string | null
           frequencia_relatorios: string | null
@@ -529,6 +672,8 @@ export type Database = {
           configuracoes?: Json | null
           created_at?: string
           detalhes?: string | null
+          ia_modo_acao?: string
+          perfil_restaurante?: Json
           é_pagante?: boolean | null
           email?: string | null
           frequencia_relatorios?: string | null
@@ -559,6 +704,8 @@ export type Database = {
           configuracoes?: Json | null
           created_at?: string
           detalhes?: string | null
+          ia_modo_acao?: string
+          perfil_restaurante?: Json
           é_pagante?: boolean | null
           email?: string | null
           frequencia_relatorios?: string | null
@@ -587,6 +734,36 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      buscar_conhecimento: {
+        Args: {
+          consulta_embedding: string
+          consulta_texto?: string
+          limite?: number
+          similaridade_minima?: number
+        }
+        Returns: {
+          conteudo: string
+          escopo: string
+          similaridade: number
+          titulo: string
+          url: string
+        }[]
+      }
+      buscar_conhecimento_para: {
+        Args: {
+          consulta_embedding: string
+          consulta_texto?: string
+          limite?: number
+          p_restaurante_id: number
+        }
+        Returns: {
+          conteudo: string
+          escopo: string
+          similaridade: number
+          titulo: string
+          url: string
+        }[]
+      }
       criar_restaurante_onboarding: {
         Args: { p_mascote_config: Json; p_nome_restaurante: string }
         Returns: number

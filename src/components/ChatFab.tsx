@@ -190,11 +190,6 @@ export function ChatFab() {
 
   const [hasError, setHasError] = useState(false)
   const [failedMessage, setFailedMessage] = useState('')
-  const [pendingAction, setPendingAction] = useState<{
-    tipo: 'criar_acao' | 'criar_insight'
-    dados: any
-  } | null>(null)
-
   // Fluxo do agente
   const [acaoPendente, setAcaoPendente] = useState<AcaoAgente | null>(null)
   const [formularioPendente, setFormularioPendente] = useState<(TipoFormulario & { acao_pretendida?: string }) | null>(null)
@@ -307,7 +302,6 @@ export function ChatFab() {
     setView('chat')
     setHasError(false)
     setFailedMessage('')
-    setPendingAction(null)
   }
 
   const handleNovaConversa = () => {
@@ -315,8 +309,10 @@ export function ChatFab() {
     setView('chat')
     setHasError(false)
     setFailedMessage('')
-    setPendingAction(null)
-    setImagePreview(null)
+    setAcaoPendente(null)
+    setFormularioPendente(null)
+    setUltimoRegistro(null)
+    setAnexos([])
   }
 
   const handleTogglePin = (e: React.MouseEvent, id: string) => {
@@ -553,7 +549,7 @@ export function ChatFab() {
     // A mensagem aparece na hora — buscar contexto e chamar a IA vem depois
     adicionarMensagemUsuario(msgTexto, anexosMsg.length ? anexosMsg : undefined)
 
-    const contexto = await fetchContexto()
+    const contexto: Record<string, any> = await fetchContexto()
     if (documentos.length) contexto.arquivos = documentos
 
     const result = await enviar(msgTexto, contexto, undefined, anexosMsg, {
@@ -802,7 +798,6 @@ export function ChatFab() {
             <>
               <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-white">
                 {messagesToRender.map((msg, i) => {
-                  if (msg.role === 'system') return null
                   const isLast = i === messagesToRender.length - 1
                   return (
                     <div key={i} className="flex flex-col gap-2">

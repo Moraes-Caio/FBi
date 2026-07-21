@@ -49,7 +49,9 @@ export async function atualizarCampoConfig(
   }
 
   if (COLUNAS_TEXTO.has(campo)) {
-    await supabase.from('restaurantes').update({ [campo]: v || null }).eq('id', restauranteId)
+    // coluna definida em tempo de execução: fora do alcance dos tipos gerados
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('restaurantes').update({ [campo]: v || null }).eq('id', restauranteId)
     return
   }
 

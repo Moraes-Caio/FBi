@@ -1,4 +1,12 @@
 import { supabase } from '@/lib/supabase/client'
+
+/**
+ * O motor grava em tabelas e colunas definidas em tempo de execução (o tipo da
+ * ação decide o alvo), o que os tipos gerados do Supabase não conseguem inferir.
+ * Este alias concentra esses acessos dinâmicos num único ponto explícito.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const db = supabase as any
 import { CAMPOS_CONFIG, campoValido, atualizarCampoConfig } from '@/lib/queries/config-update'
 
 /**
@@ -147,7 +155,7 @@ export async function executarAcao(
         status: normalizarStatus(d.status ?? 'PENDENTE'),
         texto: 'Criada pelo assistente de IA a pedido do dono.',
       }
-      const { data, error } = await supabase.from('acoes_operacionais').insert(linha).select().single()
+      const { data, error } = await db.from('acoes_operacionais').insert(linha).select().single()
       if (error) throw error
       return registrar(restauranteId, acao, modo, { tabela: 'acoes_operacionais', id: String(data.id) }, null, data)
     }
@@ -164,7 +172,7 @@ export async function executarAcao(
       if (d.status !== undefined) campos.status = normalizarStatus(d.status)
       if (!Object.keys(campos).length) throw new Error('Nada para alterar nessa ação.')
 
-      const { data: depois, error } = await supabase
+      const { data: depois, error } = await db
         .from('acoes_operacionais').update(campos).eq('id', d.id).select().single()
       if (error) throw error
       return registrar(restauranteId, acao, modo, { tabela: 'acoes_operacionais', id: String(d.id) }, antes, depois)
@@ -190,7 +198,7 @@ export async function executarAcao(
         gerado_por: 'ia_chat',
         ativo: true,
       }
-      const { data, error } = await supabase.from('insights').insert(linha).select().single()
+      const { data, error } = await db.from('insights').insert(linha).select().single()
       if (error) throw error
       return registrar(restauranteId, acao, modo, { tabela: 'insights', id: String(data.id) }, null, data)
     }
@@ -207,7 +215,7 @@ export async function executarAcao(
       if (d.categoria !== undefined) campos.categoria = String(d.categoria)
       if (!Object.keys(campos).length) throw new Error('Nada para alterar nesse insight.')
 
-      const { data: depois, error } = await supabase
+      const { data: depois, error } = await db
         .from('insights').update(campos).eq('id', d.id).select().single()
       if (error) throw error
       return registrar(restauranteId, acao, modo, { tabela: 'insights', id: String(d.id) }, antes, depois)
@@ -274,20 +282,20 @@ export async function reverterAcao(registro: RegistroAcao): Promise<void> {
 
   if (tipo.startsWith('criar_')) {
     // Desfazer uma criação = apagar o que foi criado
-    if (tabela && id) await supabase.from(tabela).delete().eq('id', id)
+    if (tabela && id) await db.from(tabela).delete().eq('id', id)
   } else if (tipo === 'atualizar_config') {
     await atualizarCampoConfig(Number(id), antes.campo, String(antes.valor ?? ''))
   } else if (tipo.startsWith('excluir_')) {
     if (tabela === 'insights') {
-      await supabase.from('insights').update({ ativo: true }).eq('id', id)
+      await db.from('insights').update({ ativo: true }).eq('id', id)
     } else if (tabela && antes) {
       // Recria a linha apagada com os mesmos valores
-      await supabase.from(tabela).insert(antes)
+      await db.from(tabela).insert(antes)
     }
   } else if (tipo.startsWith('editar_')) {
     if (tabela && id && antes) {
       const { id: _ignora, created_at: _c, ...campos } = antes
-      await supabase.from(tabela).update(campos).eq('id', id)
+      await db.from(tabela).update(campos).eq('id', id)
     }
   }
 

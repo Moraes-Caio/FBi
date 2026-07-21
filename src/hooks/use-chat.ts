@@ -401,7 +401,6 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     adicionarMensagemUsuario,
     removerUltimaMensagem,
     carregarHistorico,
-    detectarIntencao,
     setMessages: (m: MensagemChat[]) => aplicar(() => m),
     setError,
     sessaoId,
