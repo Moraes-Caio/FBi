@@ -1,4 +1,4 @@
-import { enviarMensagem } from '@/lib/openrouter'
+import { enviarMensagem, enviarMensagemComFontes } from '@/lib/openrouter'
 import { CAMPOS_CONFIG } from '@/lib/queries/config-update'
 import { AcaoAgente, validarAcao } from '@/lib/queries/agente-ia'
 
@@ -126,7 +126,212 @@ um arquivo antigo, responda apenas sobre os desta mensagem.`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. AGENTE ROTEADOR — memória curta
+// 2. AGENTE PLANEJADOR — decide quem do time precisa trabalhar
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface Plano {
+  /** Consultar a internet (dados que mudam com o tempo) */
+  pesquisarWeb: boolean
+  /** Termos de busca escolhidos pelo próprio planejador */
+  termosWeb: string
+  /** Página específica para abrir (quando o dono manda um link) */
+  urlParaLer: string
+  /** Consultar os materiais de treinamento (RAG) */
+  consultarConhecimento: boolean
+  /** Pergunta reescrita para a busca vetorial render mais */
+  consultaConhecimento: string
+}
+
+const PLANO_VAZIO: Plano = {
+  pesquisarWeb: false,
+  termosWeb: '',
+  urlParaLer: '',
+  consultarConhecimento: false,
+  consultaConhecimento: '',
+}
+
+/**
+ * Roda uma vez por mensagem e diz quais fontes externas valem a pena.
+ * Antes isso era feito pelo próprio redator, com marcadores no meio da
+ * resposta — custava uma chamada inteira a mais e falhava com frequência.
+ */
+export async function planejar(mensagem: string, temArquivos: boolean): Promise<Plano> {
+  if (!mensagem.trim()) return PLANO_VAZIO
+  try {
+    const res = await enviarMensagem(
+      [
+        {
+          role: 'system',
+          content: `Você planeja o trabalho de um assistente de restaurante. Não responda ao dono,
+apenas diga que fontes precisam ser consultadas.
+
+Mensagem do dono: "${mensagem}"
+${temArquivos ? 'Ele anexou arquivos nesta mensagem (já serão lidos por outro agente).' : ''}
+
+Responda APENAS com este JSON:
+{ "pesquisarWeb": true|false,
+  "termosWeb": "termos de busca, como você digitaria no Google",
+  "urlParaLer": "endereço completo, se ele mandou um link ou citou um site",
+  "consultarConhecimento": true|false,
+  "consultaConhecimento": "pergunta reescrita para buscar nos materiais" }
+
+pesquisarWeb = true quando a resposta depende de algo que muda com o tempo ou está
+fora do restaurante: leis e normas, preços, fornecedores, concorrentes, tendências,
+notícias, datas, ferramentas, empresas, receitas.
+
+consultarConhecimento = true quando o assunto pode estar em manuais e cartilhas do
+setor: higiene e vigilância sanitária, custos e CMV, cardápio, atendimento, estoque,
+precificação, marketing, obrigações legais, indicadores.
+
+Ambos podem ser true, mas o padrão é FALSE nos dois. Só marque true quando a
+resposta realmente depender daquela fonte.
+
+EXEMPLOS (siga à risca):
+"como estão minhas avaliações?" -> tudo false (é dado do próprio painel)
+"quantas mesas eu tenho?" -> tudo false (está na configuração)
+"crie uma ação de reparar as mesas" -> tudo false (é só executar um pedido)
+"resumo das reclamações" -> tudo false (são os dados dele)
+"posso descongelar carne na pia?" -> consultarConhecimento true (norma sanitária)
+"meu CMV está alto, o que faço?" -> consultarConhecimento true (gestão de custos)
+"quanto está a arroba do boi?" -> pesquisarWeb true (preço muda todo dia)
+"o que tem no site X" -> urlParaLer com o endereço`,
+        },
+        { role: 'user', content: 'Planeje e responda no formato JSON pedido.' },
+      ],
+      { ...JSON_OPTS, max_tokens: 250 },
+    )
+    const d = parse(res)
+    if (!d) return PLANO_VAZIO
+    return {
+      pesquisarWeb: !!d.pesquisarWeb,
+      termosWeb: String(d.termosWeb || '').trim(),
+      urlParaLer: String(d.urlParaLer || '').trim(),
+      consultarConhecimento: !!d.consultarConhecimento,
+      consultaConhecimento: String(d.consultaConhecimento || mensagem).trim(),
+    }
+  } catch {
+    return PLANO_VAZIO
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. AGENTE DE PESQUISA — sem memória
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ResultadoPesquisa {
+  resumo: string
+  fontes: { url: string; titulo: string }[]
+}
+
+/**
+ * Pesquisa e devolve os FATOS apurados, não a resposta final. Quem conversa
+ * com o dono é o redator — assim a voz do assistente não muda.
+ */
+export async function pesquisarNaWeb(termos: string): Promise<ResultadoPesquisa | null> {
+  if (!termos.trim()) return null
+  try {
+    const { texto, fontes } = await enviarMensagemComFontes(
+      [
+        {
+          role: 'system',
+          content: `Pesquise e relate os fatos encontrados sobre o tema pedido, em português do Brasil.
+Escreva em tópicos curtos e objetivos, com números e datas quando houver.
+Não converse, não cumprimente, não dê conselhos: só os fatos apurados.
+Se não encontrar nada confiável, diga isso em uma linha.`,
+        },
+        { role: 'user', content: termos },
+      ],
+      { web: true, max_tokens: 700, temperature: 0 },
+    )
+    return { resumo: texto, fontes }
+  } catch {
+    return null
+  }
+}
+
+/** Lê uma página específica e resume — reaproveita o agente de documentos. */
+export async function lerPaginaWeb(
+  url: string,
+  buscarPagina: (u: string) => Promise<{ ok: boolean; titulo?: string; texto?: string; motivo?: string }>,
+): Promise<ResultadoPesquisa | null> {
+  try {
+    const pagina = await buscarPagina(url)
+    if (!pagina.ok || !pagina.texto) return null
+    const analise = await analisarDocumentos([{ nome: pagina.titulo || url, texto: pagina.texto }])
+    if (!analise.length) return null
+    const a = analise[0]
+    return {
+      resumo: `${a.resumo}\n${a.pontos.map((p) => `- ${p}`).join('\n')}`,
+      fontes: [{ url, titulo: pagina.titulo || url }],
+    }
+  } catch {
+    return null
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. AGENTE DE CONHECIMENTO — sem memória
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TrechoConhecimento {
+  conteudo: string
+  titulo: string
+}
+
+/**
+ * A busca vetorial traz trechos aproximados, e vários não servem. Este agente
+ * lê o que voltou e fica só com o que responde de fato — antes, trechos fora
+ * do assunto iam direto para o prompt e atrapalhavam a resposta.
+ */
+export async function curarConhecimento(
+  pergunta: string,
+  trechos: TrechoConhecimento[],
+): Promise<string> {
+  if (!trechos.length) return ''
+  try {
+    const res = await enviarMensagem(
+      [
+        {
+          role: 'system',
+          content: `Você seleciona material de apoio. A busca trouxe trechos por semelhança e
+alguns não têm relação com a pergunta.
+
+Pergunta: "${pergunta}"
+
+Trechos:
+${trechos.map((t, i) => `[${i}] (${t.titulo})\n${t.conteudo}`).join('\n\n')}
+
+Responda APENAS com este JSON:
+{ "uteis": [índices dos trechos que realmente ajudam a responder, do melhor para o pior] }
+
+Seja rigoroso: se um trecho é só vagamente parecido, deixe de fora.
+Se nenhum servir, devolva { "uteis": [] }.`,
+        },
+        { role: 'user', content: 'Selecione e responda no formato JSON pedido.' },
+      ],
+      { ...JSON_OPTS, max_tokens: 150 },
+    )
+    const d = parse(res)
+    const indices: number[] = Array.isArray(d?.uteis) ? d.uteis : []
+    const escolhidos = indices
+      .map((i) => trechos[i])
+      .filter(Boolean)
+      .slice(0, 4)
+    if (!escolhidos.length) return ''
+    return escolhidos
+      .map((t, i) => `[${i + 1}] (${t.titulo})\n"${t.conteudo}"`)
+      .join('\n\n')
+  } catch {
+    // Sem curadoria, é melhor mandar os melhores do que não mandar nada
+    return trechos
+      .slice(0, 3)
+      .map((t, i) => `[${i + 1}] (${t.titulo})\n"${t.conteudo}"`)
+      .join('\n\n')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. AGENTE ROTEADOR — memória curta
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type Dominio = 'conversa' | 'acao' | 'insight' | 'config' | 'anotacao'
@@ -181,7 +386,7 @@ Se ele só perguntou ou comentou, é "conversa" + "nenhuma".`,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. AGENTES ESCRITORES — sem memória de conversa
+// 6. AGENTES ESCRITORES — sem memória de conversa
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Monta os campos de uma ação nova a partir do pedido. */
@@ -354,7 +559,7 @@ ${alvo === 'insight' ? 'Insight não tem status: arquivar/desativar é remoção
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. COORDENADOR — junta o time
+// 7. COORDENADOR — junta o time
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ContextoAgente {

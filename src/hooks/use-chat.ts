@@ -1,15 +1,15 @@
 import { useState, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { enviarMensagem, enviarMensagemComFontes, ChatMessage, FonteWeb } from '@/lib/openrouter'
-import {
-  construirSystemPromptChef, construirSystemPromptAgente, construirSystemPromptMontarCriacao, construirSystemPromptMontarConfig,
-  MARCADOR_BUSCA, MARCADOR_LEITURA,
-} from '@/lib/prompts-sistema'
+import { construirSystemPromptChef } from '@/lib/prompts-sistema'
 import { memorizarDaConversa, FatoMemoria } from '@/lib/queries/memoria-assistente'
 import { buscarConhecimento, extrairTextoDeUrl as lerPagina } from '@/lib/queries/conhecimento'
 import { CAMPOS_CONFIG } from '@/lib/queries/config-update'
 import { AcaoAgente, FormularioIA } from '@/lib/queries/agente-ia'
-import { decidirAlteracao, analisarDocumentos, blocoDeAnalises, AnaliseArquivo } from '@/lib/ia/agentes'
+import {
+  decidirAlteracao, analisarDocumentos, blocoDeAnalises, AnaliseArquivo,
+  planejar, pesquisarNaWeb, lerPaginaWeb, curarConhecimento,
+} from '@/lib/ia/agentes'
 
 export interface AtualizacaoConfig {
   campo: string
@@ -173,37 +173,65 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
     try {
       const contextoFinal = { ...contextoDadosIniciais, ...contextoDadosAdicionais }
+      let fontesDaPesquisa: FonteWeb[] = []
 
-      // Agente de documentos (sem memória): lê os arquivos desta mensagem
-      // isoladamente. É o que evita ele confundir com arquivos antigos.
-      if (contextoFinal.arquivos?.length) {
-        const analises = await analisarDocumentos(contextoFinal.arquivos)
-        analisesRef.current = [...analisesRef.current, ...analises]
-        contextoFinal.analiseArquivos = blocoDeAnalises(
-          analises,
-          analisesRef.current.slice(0, -analises.length),
-        )
+      // ── ORQUESTRAÇÃO ──────────────────────────────────────────────────
+      // O planejador decide quem trabalha; os agentes rodam em paralelo e
+      // entregam material pronto. O redator (a chamada final) só escreve.
+      const temArquivos = !!contextoFinal.arquivos?.length
+      const plano = texto && !systemMessageOverride
+        ? await planejar(texto, temArquivos)
+        : null
+
+      if (plano?.pesquisarWeb || plano?.urlParaLer) setBuscandoWeb(true)
+
+      const [analises, pesquisa, trechos] = await Promise.all([
+        // Documentos: cada arquivo lido isolado, sem histórico
+        temArquivos ? analisarDocumentos(contextoFinal.arquivos) : Promise.resolve([]),
+        // Pesquisa: página específica tem prioridade sobre busca aberta
+        plano?.urlParaLer
+          ? lerPaginaWeb(plano.urlParaLer, lerPagina)
+          : plano?.pesquisarWeb
+            ? pesquisarNaWeb(plano.termosWeb || texto)
+            : Promise.resolve(null),
+        // Conhecimento: busca vetorial nos materiais de treinamento
+        plano?.consultarConhecimento
+          ? buscarConhecimento(plano.consultaConhecimento || texto, 6)
+          : Promise.resolve([]),
+      ])
+
+      if (analises.length) {
+        const anteriores = analisesRef.current
+        analisesRef.current = [...anteriores, ...analises]
+        contextoFinal.analiseArquivos = blocoDeAnalises(analises, anteriores)
       } else if (analisesRef.current.length) {
-        // Sem anexo agora: só o índice do que já foi lido na conversa
         contextoFinal.analiseArquivos = blocoDeAnalises([], analisesRef.current)
       }
 
-      // RAG: busca vetorial nos documentos de treinamento antes de montar o prompt
-      if (texto && !systemMessageOverride) {
-        contextoFinal.conhecimento = await buscarConhecimento(texto, 5)
+      setBuscandoWeb(false)
+
+      if (pesquisa) {
+        contextoFinal.pesquisaWeb = pesquisa.resumo
+        fontesDaPesquisa = pesquisa.fontes
       }
 
-      const podeBuscar = opcoes.buscaWeb !== false && !systemMessageOverride
+      // Curador filtra o que a busca vetorial trouxe por semelhança
+      if (trechos.length) {
+        contextoFinal.conhecimento = await curarConhecimento(
+          plano?.consultaConhecimento || texto,
+          trechos.map((t) => ({ conteudo: t.conteudo, titulo: t.titulo })),
+        )
+      }
+
       const sysPrompt =
         systemMessageOverride ||
         construirSystemPromptChef(contextoFinal.mascote_config, contextoFinal, {
-          podeBuscarWeb: podeBuscar,
+          jaBuscou: !!pesquisa,
         })
 
       const apiMessages: ChatMessage[] = [
         { role: 'system', content: sysPrompt },
         ...currentMessages.map((m): ChatMessage => {
-          // Só imagens viram parte visual; PDF/texto vão como contexto textual
           const imagens = (m.anexos || []).filter((a) => a.tipo === 'imagem' && a.url)
           if (imagens.length) {
             return {
@@ -221,91 +249,8 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
         }),
       ]
 
-      let { texto: respostaTexto, fontes } = await enviarMensagemComFontes(apiMessages)
-
-      // A IA sinalizou que precisa de informação externa. Só gastamos uma
-      // consulta quando ela própria diz que precisa.
-      const bruto = respostaTexto.trim()
-      const pedeBusca = bruto.toUpperCase().startsWith(MARCADOR_BUSCA)
-      const pedeLeitura = bruto.toUpperCase().startsWith(MARCADOR_LEITURA)
-
-      if (podeBuscar && (pedeBusca || pedeLeitura)) {
-        setBuscandoWeb(true)
-        try {
-          const promptComBusca = construirSystemPromptChef(
-            contextoFinal.mascote_config,
-            contextoFinal,
-            { jaBuscou: true },
-          )
-          const historico = apiMessages.slice(1)
-
-          let termosBusca = pedeBusca
-            ? bruto.slice(MARCADOR_BUSCA.length).replace(/^[:\s]+/, '').trim()
-            : ''
-          let leituraOk = false
-
-          if (pedeLeitura) {
-            const url = bruto.slice(MARCADOR_LEITURA.length).replace(/^[:\s]+/, '').trim()
-            const pagina = await lerPagina(url)
-
-            if (pagina.ok) {
-              respostaTexto = (
-                await enviarMensagemComFontes([
-                  { role: 'system', content: promptComBusca },
-                  ...historico,
-                  {
-                    role: 'system',
-                    content: `Conteúdo da página ${url} (${pagina.titulo}):\n\n${pagina.texto!.slice(0, 12000)}`,
-                  },
-                ])
-              ).texto
-              fontes = [{ url, titulo: pagina.titulo || url }]
-              leituraOk = true
-            } else {
-              // Página bloqueada ou feita em JS: em vez de falhar, pesquisa na web
-              termosBusca = url.replace(/^https?:\/\//, '').replace(/\/$/, '')
-            }
-          }
-
-          if (!leituraOk) {
-            const comWeb = await enviarMensagemComFontes(
-              [
-                { role: 'system', content: promptComBusca },
-                ...historico,
-                ...(termosBusca
-                  ? [{ role: 'system' as const, content: `Pesquise por: ${termosBusca}` }]
-                  : []),
-              ],
-              { web: true },
-            )
-            respostaTexto = comWeb.texto
-            fontes = comWeb.fontes
-          }
-        } catch (err: any) {
-          // Consulta externa falhou: em vez de mostrar erro técnico, responde
-          // com o que sabe, avisando que não conseguiu acessar a internet.
-          console.warn('Consulta externa falhou:', err)
-          try {
-            respostaTexto = (
-              await enviarMensagemComFontes([
-                { role: 'system', content: sysPrompt },
-                ...apiMessages.slice(1),
-                {
-                  role: 'system',
-                  content:
-                    'A consulta à internet falhou. Responda com o que você já sabe, avisando numa frase curta que não conseguiu acessar a internet agora e que a informação pode estar desatualizada. Não mencione erros técnicos.',
-                },
-              ])
-            ).texto
-          } catch {
-            respostaTexto =
-              'Não consegui acessar a internet agora para confirmar isso. Tente de novo em instantes.'
-          }
-          fontes = []
-        } finally {
-          setBuscandoWeb(false)
-        }
-      }
+      const respostaTexto = (await enviarMensagemComFontes(apiMessages)).texto
+      const fontes = fontesDaPesquisa
 
       // Mostra a resposta assim que chega e JÁ desliga o "digitando":
       // o que vem depois (gravar histórico, memória, intenção) é trabalho de
