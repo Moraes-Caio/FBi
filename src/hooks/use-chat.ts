@@ -41,6 +41,8 @@ export interface MensagemChat {
   proposta?: AcaoAgente | null
   /** Leitura dos arquivos desta mensagem, feita por um agente sem memória */
   analises?: AnaliseArquivo[]
+  /** Mensagem que esta responde — fica visível na bolha, como no WhatsApp */
+  respondendoA?: { uid: string; autor: 'user' | 'assistant'; texto: string }
 }
 
 export interface ResultadoEnvio {
@@ -89,8 +91,12 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
   const novoUid = () => `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   const adicionarMensagemUsuario = useCallback(
-    (texto: string, anexos?: AnexoMensagem[]) =>
-      aplicar((prev) => [...prev, { uid: novoUid(), role: 'user', text: texto, anexos }]),
+    (
+      texto: string,
+      anexos?: AnexoMensagem[],
+      respondendoA?: MensagemChat['respondendoA'],
+    ) =>
+      aplicar((prev) => [...prev, { uid: novoUid(), role: 'user', text: texto, anexos, respondendoA }]),
     [aplicar],
   )
 
@@ -147,6 +153,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
               ((m.contexto_dados as any)?.imagem
                 ? [{ nome: 'imagem', tipo: 'imagem', url: (m.contexto_dados as any).imagem }]
                 : undefined),
+            respondendoA: (m.contexto_dados as any)?.respondendoA || undefined,
           })),
         )
       }
@@ -159,7 +166,12 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     contextoDadosAdicionais: any = {},
     systemMessageOverride?: string,
     anexos?: AnexoMensagem[],
-    opcoes: { jaExibida?: boolean; memoria?: FatoMemoria[]; buscaWeb?: boolean } = {},
+    opcoes: {
+      jaExibida?: boolean
+      memoria?: FatoMemoria[]
+      buscaWeb?: boolean
+      respondendoA?: MensagemChat['respondendoA']
+    } = {},
   ): Promise<ResultadoEnvio> => {
     enviandoRef.current = true
     setLoading(true)
@@ -270,6 +282,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
             // guarda só o necessário para reexibir (texto extraído fica de fora)
             contexto_dados: {
               anexos: (anexos || []).map((a) => ({ nome: a.nome, tipo: a.tipo, url: a.url ?? null })),
+              respondendoA: opcoes.respondendoA ?? null,
             },
           })
         }

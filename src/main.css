@@ -115,3 +115,14 @@
     background-color: #ef4444;
   }
 }
+
+/* Esconde a barra de rolagem mantendo a rolagem funcionando.
+   Usada no chat e no visualizador de anexos. */
+.sem-barra {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* Edge antigo */
+}
+.sem-barra::-webkit-scrollbar {   /* Chrome, Safari */
+  width: 0;
+  height: 0;
+}

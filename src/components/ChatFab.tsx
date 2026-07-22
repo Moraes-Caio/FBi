@@ -639,7 +639,7 @@ export function ChatFab({
     setFormularioPendente(null)
 
     // A mensagem aparece na hora — buscar contexto e chamar a IA vem depois
-    adicionarMensagemUsuario(msgTexto, anexosMsg.length ? anexosMsg : undefined)
+    adicionarMensagemUsuario(msgTexto, anexosMsg.length ? anexosMsg : undefined, citando || undefined)
 
     const contexto: Record<string, any> = await fetchContexto()
     if (documentos.length) contexto.arquivos = documentos
@@ -648,6 +648,7 @@ export function ChatFab({
     const result = await enviar(msgTexto, contexto, undefined, anexosMsg, {
       jaExibida: true,
       memoria: memoriaRef.current,
+      respondendoA: citando || undefined,
     })
 
     if (result?.error) {
@@ -762,8 +763,9 @@ export function ChatFab({
 
   const messagesToRender =
     messages.length === 0
-      ? [{ uid: 'saudacao', role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, anexos: undefined, fontes: undefined, registros: undefined, proposta: undefined }]
-      : messages.map((m) => ({ uid: m.uid, role: m.role, content: m.text, anexos: m.anexos, fontes: m.fontes, registros: m.registros, proposta: m.proposta }))
+      ? [{ uid: 'saudacao', role: 'assistant' as const, content: `Olá! Sou o ${mascoteNome}, seu assistente de inteligência. Como posso ajudar a melhorar seu restaurante hoje?`, anexos: undefined, fontes: undefined, registros: undefined, proposta: undefined, respondendoA: undefined }]
+      : messages.map((m) => ({ uid: m.uid, role: m.role, content: m.text, anexos: m.anexos, fontes: m.fontes, registros: m.registros, proposta: m.proposta,
+          respondendoA: m.respondendoA }))
 
   return (
     <>
@@ -834,7 +836,7 @@ export function ChatFab({
 
           {/* ── History view ── */}
           {!anexoAberto && view === 'history' && (
-            <div className="flex-1 overflow-y-auto bg-gray-50">
+            <div className="flex-1 overflow-y-auto sem-barra bg-gray-50">
               {loadingSessoes ? (
                 <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">Carregando...</div>
               ) : groupedSessoes.length === 0 ? (
@@ -946,7 +948,7 @@ export function ChatFab({
               <div
                 ref={areaRolagemRef}
                 onScroll={aoRolar}
-                className="relative flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-4 bg-white"
+                className="relative flex-1 overflow-y-auto overflow-x-hidden sem-barra p-4 flex flex-col gap-4 bg-white"
               >
                 {messagesToRender.map((msg, i) => {
                   const isLast = i === messagesToRender.length - 1
@@ -971,6 +973,35 @@ export function ChatFab({
                               : 'bg-[#F9FAFB] text-[#1F2937] border border-gray-100 rounded-tl-none',
                           )}
                         >
+                          {msg.respondendoA && (
+                            <button
+                              onClick={() => irParaMensagem(msg.respondendoA!.uid)}
+                              className={cn(
+                                'w-full text-left mb-2 rounded-md border-l-2 px-2 py-1.5 transition-opacity hover:opacity-80',
+                                msg.role === 'user'
+                                  ? 'border-white/60 bg-white/15'
+                                  : 'border-primary bg-primary/5',
+                              )}
+                              title="Ir para a mensagem respondida"
+                            >
+                              <p
+                                className={cn(
+                                  'text-[10px] font-semibold',
+                                  msg.role === 'user' ? 'text-white/80' : 'text-primary',
+                                )}
+                              >
+                                {msg.respondendoA.autor === 'user' ? 'Você' : mascoteNome}
+                              </p>
+                              <p
+                                className={cn(
+                                  'text-[11px] line-clamp-2',
+                                  msg.role === 'user' ? 'text-white/75' : 'text-muted-foreground',
+                                )}
+                              >
+                                {msg.respondendoA.texto}
+                              </p>
+                            </button>
+                          )}
                           {!!msg.anexos?.length && (
                             <div
                               className={cn(

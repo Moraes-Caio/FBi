@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Download, ExternalLink } from 'lucide-react'
+import { VisualizadorPdf } from '@/components/chat/VisualizadorPdf'
 
 export interface AnexoVisivel {
   nome: string
@@ -47,27 +48,14 @@ export function VisualizadorAnexo({ anexo, onVoltar }: { anexo: AnexoVisivel; on
         )}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto bg-gray-50">
+      <div className="flex-1 min-h-0 overflow-auto sem-barra bg-gray-50">
         {anexo.tipo === 'imagem' && anexo.url && (
           <div className="h-full w-full flex items-center justify-center p-3">
             <img src={anexo.url} alt={anexo.nome} className="max-h-full max-w-full object-contain" />
           </div>
         )}
 
-        {anexo.tipo === 'pdf' && anexo.url && (
-          <div className="h-full w-full flex flex-col">
-            {/* iframe é mais confiável que <object> para PDF entre navegadores */}
-            <iframe src={anexo.url} title={anexo.nome} className="flex-1 w-full border-0" />
-            <a
-              href={anexo.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 py-2 text-center text-[11px] text-muted-foreground hover:text-primary"
-            >
-              Não apareceu? Abrir em nova aba
-            </a>
-          </div>
-        )}
+        {anexo.tipo === 'pdf' && anexo.url && <VisualizadorPdf url={anexo.url} />}
 
         {anexo.tipo === 'texto' && (
           <pre className="p-4 text-xs whitespace-pre-wrap break-words text-gray-800 font-mono">
