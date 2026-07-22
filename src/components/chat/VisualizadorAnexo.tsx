@@ -55,14 +55,18 @@ export function VisualizadorAnexo({ anexo, onVoltar }: { anexo: AnexoVisivel; on
         )}
 
         {anexo.tipo === 'pdf' && anexo.url && (
-          <object data={anexo.url} type="application/pdf" className="h-full w-full">
-            <div className="p-6 text-center text-sm text-muted-foreground">
-              Seu navegador não abriu o PDF aqui.
-              <a href={anexo.url} target="_blank" rel="noopener noreferrer" className="text-primary underline ml-1">
-                Abrir em nova aba
-              </a>
-            </div>
-          </object>
+          <div className="h-full w-full flex flex-col">
+            {/* iframe é mais confiável que <object> para PDF entre navegadores */}
+            <iframe src={anexo.url} title={anexo.nome} className="flex-1 w-full border-0" />
+            <a
+              href={anexo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 py-2 text-center text-[11px] text-muted-foreground hover:text-primary"
+            >
+              Não apareceu? Abrir em nova aba
+            </a>
+          </div>
         )}
 
         {anexo.tipo === 'texto' && (

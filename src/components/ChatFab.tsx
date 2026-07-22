@@ -440,13 +440,24 @@ export function ChatFab({
   const TEXTO_ACEITO = ['text/plain', 'text/markdown', 'text/csv', 'application/json']
   const ACCEPT = 'image/*,application/pdf,.txt,.md,.csv,.json'
 
-  /** Envia um arquivo ao bucket e devolve a URL pública. */
+  /**
+   * Envia um arquivo ao bucket e devolve a URL pública.
+   * O contentType é obrigatório: sem ele o Storage serve como text/plain e o
+   * navegador se recusa a exibir o PDF.
+   */
   const subirArquivo = async (file: File) => {
-    const ext = file.name.split('.').pop() || 'bin'
+    const ext = (file.name.split('.').pop() || 'bin').toLowerCase()
+    const porExtensao: Record<string, string> = {
+      pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown',
+      csv: 'text/csv', json: 'application/json',
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+      gif: 'image/gif', webp: 'image/webp',
+    }
+    const contentType = file.type || porExtensao[ext] || 'application/octet-stream'
     const caminho = `${user?.id ?? 'anon'}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
     const { error } = await supabase.storage
       .from('chat-imagens')
-      .upload(caminho, file, { upsert: true, contentType: file.type || undefined })
+      .upload(caminho, file, { upsert: true, contentType })
     if (error) throw error
     return supabase.storage.from('chat-imagens').getPublicUrl(caminho).data.publicUrl
   }
@@ -949,9 +960,12 @@ export function ChatFab({
                       )}
                     >
                       <div className={cn('group/msg flex w-full gap-1', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                        {/* Nas mensagens do dono os botões vêm ANTES da bolha:
+                            depois dela, empurrariam o balão para longe da borda */}
                         <div
                           className={cn(
                             'px-4 py-3 rounded-2xl text-sm max-w-[85%] min-w-0 break-words shadow-sm',
+                            msg.role === 'user' && 'order-2',
                             msg.role === 'user'
                               ? 'bg-[#1D4ED8] text-white rounded-tr-none'
                               : 'bg-[#F9FAFB] text-[#1F2937] border border-gray-100 rounded-tl-none',
@@ -1023,7 +1037,12 @@ export function ChatFab({
                           )}
                           {!!msg.fontes?.length && <Fontes fontes={msg.fontes} />}
                         </div>
-                        <div className="opacity-0 group-hover/msg:opacity-100 transition-opacity self-center flex items-center gap-0.5 shrink-0">
+                        <div
+                          className={cn(
+                            'opacity-0 group-hover/msg:opacity-100 transition-opacity self-center flex items-center gap-0.5 shrink-0',
+                            msg.role === 'user' && 'order-1',
+                          )}
+                        >
                           <button
                             onClick={() =>
                               setCitacao({
