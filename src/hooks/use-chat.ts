@@ -8,7 +8,8 @@ import {
 import { memorizarDaConversa, FatoMemoria } from '@/lib/queries/memoria-assistente'
 import { buscarConhecimento, extrairTextoDeUrl as lerPagina } from '@/lib/queries/conhecimento'
 import { CAMPOS_CONFIG } from '@/lib/queries/config-update'
-import { AcaoAgente, FormularioIA, validarAcao } from '@/lib/queries/agente-ia'
+import { AcaoAgente, FormularioIA } from '@/lib/queries/agente-ia'
+import { decidirAlteracao, analisarDocumentos, blocoDeAnalises, AnaliseArquivo } from '@/lib/ia/agentes'
 
 export interface AtualizacaoConfig {
   campo: string
@@ -38,6 +39,8 @@ export interface MensagemChat {
   registros?: { id: string; descricao: string }[]
   /** Alteração proposta por esta resposta, aguardando o dono confirmar */
   proposta?: AcaoAgente | null
+  /** Leitura dos arquivos desta mensagem, feita por um agente sem memória */
+  analises?: AnaliseArquivo[]
 }
 
 export interface ResultadoEnvio {
@@ -57,6 +60,8 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
   const messagesRef = useRef<MensagemChat[]>([])
   // Trava recargas de histórico enquanto há um envio em andamento
   const enviandoRef = useRef(false)
+  // Índice das leituras de arquivo já feitas nesta conversa
+  const analisesRef = useRef<AnaliseArquivo[]>([])
 
   const aplicar = useCallback((fn: (prev: MensagemChat[]) => MensagemChat[]) => {
     const novo = fn(messagesRef.current)
@@ -90,157 +95,24 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
   )
 
   /**
-   * Detector único do agente: decide se a conversa pede uma alteração no
-   * sistema, ou se falta informação e é melhor perguntar antes (formulário).
-   * Substitui os dois detectores antigos (intenção + atualização de config).
+   * Time de agentes: um roteador decide o assunto e o especialista daquele
+   * assunto monta a alteração. Substituiu o detector único, que errava por
+   * tentar decidir tudo num prompt só.
    */
   const detectarAcaoAgente = async (
     textoUsuario: string,
     respostaAssistente: string,
     ctx: any,
   ): Promise<{ acao: AcaoAgente | null; formulario: (FormularioIA & { acao_pretendida?: string }) | null }> => {
-    const vazio = { acao: null, formulario: null }
     try {
-      const res = await enviarMensagem(
-        [
-          {
-            role: 'system',
-            content: construirSystemPromptAgente({
-              mensagemUsuario: textoUsuario,
-              respostaAssistente,
-              configAtual: ctx.configAtual || {},
-              acoesAbertas: ctx.acoes || [],
-              insightsAtivos: ctx.insights || [],
-              camposConfig: Object.entries(CAMPOS_CONFIG).map(([k, v]) => `- ${k} = ${v}`),
-            }),
-          },
-          { role: 'user', content: 'Analise e responda no formato JSON pedido.' },
-        ],
-        // temperatura 0: a detecção precisa ser consistente, não criativa
-        // max_tokens folgado: JSON cortado pela metade quebra o parse
-        { response_format: { type: 'json_object' }, temperature: 0, max_tokens: 900 },
-      )
-
-      const obj = typeof res === 'string' ? JSON.parse(res) : (res as any)
-      const acao: AcaoAgente | null =
-        obj?.acao?.tipo && obj?.acao?.dados
-          ? {
-              tipo: obj.acao.tipo,
-              dados: obj.acao.dados,
-              descricao: String(obj.acao.descricao || 'Alteração no sistema'),
-            }
-          : null
-
-      // Descarta ação inválida em vez de deixar quebrar na execução
-      if (acao && validarAcao(acao)) return { acao: null, formulario: obj?.formulario ?? null }
-
-      const formulario =
-        obj?.formulario?.campos?.length
-          ? {
-              titulo: String(obj.formulario.titulo || 'Preciso de mais alguns dados'),
-              campos: obj.formulario.campos.slice(0, 2),
-              acao_pretendida: obj.formulario.acao_pretendida,
-            }
-          : null
-
-      // Rede de segurança: o detector geral às vezes desiste de criar mesmo com
-      // pedido claro. Se a mensagem é um comando de criação, montamos os campos
-      // com uma chamada curta e de propósito único, bem mais confiável.
-      if (!acao && !formulario) {
-        const alvo = detectarPedidoDeCriacao(textoUsuario)
-        if (alvo) {
-          const montada = await montarCriacao(alvo, textoUsuario)
-          if (montada) return { acao: montada, formulario: null }
-        }
-        if (mencionaCampoDeConfig(textoUsuario)) {
-          const cfg = await montarConfig(textoUsuario, ctx.configAtual || {})
-          if (cfg) return { acao: cfg, formulario: null }
-        }
-      }
-
-      return { acao, formulario }
+      const acao = await decidirAlteracao(textoUsuario, respostaAssistente, {
+        configAtual: ctx.configAtual || {},
+        acoes: ctx.acoes || [],
+        insights: ctx.insights || [],
+      })
+      return { acao, formulario: null }
     } catch {
-      return vazio
-    }
-  }
-
-  /** Reconhece "cria/crie/criar uma ação|insight" sem depender do modelo. */
-  const detectarPedidoDeCriacao = (texto: string): 'acao' | 'insight' | null => {
-    const t = texto.toLowerCase()
-    if (!/(cri[ae]r?|adicion[ae]r?|abr[ae]r?|faz|faça|fazer)/.test(t)) return null
-    if (/insight/.test(t)) return 'insight'
-    if (/a[çc][ãa]o|tarefa/.test(t)) return 'acao'
-    return null
-  }
-
-  /** Palavras que indicam um dado do perfil, para só então chamar a IA. */
-  const mencionaCampoDeConfig = (texto: string): boolean =>
-    /(mesa|mesas|lugar|lugares|capacidade|funcion|equipe|hor[áa]rio|abre|fecha|nome|chamo|chama|cozinha|culin[áa]ria|ticket|pre[çc]o m[ée]dio|p[úu]blico|prato|pratos|carro-chefe|diferencial|diferenciais|desafio|endere[çc]o|bairro|fica em|estilo|abri em|desde)/i.test(
-      texto,
-    )
-
-  const montarConfig = async (
-    textoUsuario: string,
-    configAtual: Record<string, unknown>,
-  ): Promise<AcaoAgente | null> => {
-    try {
-      const res = await enviarMensagem(
-        [
-          {
-            role: 'system',
-            content: construirSystemPromptMontarConfig(
-              textoUsuario,
-              configAtual,
-              Object.entries(CAMPOS_CONFIG).map(([k, v]) => `- ${k} = ${v}`),
-            ),
-          },
-          { role: 'user', content: 'Responda no formato JSON pedido.' },
-        ],
-        { response_format: { type: 'json_object' }, temperature: 0, max_tokens: 200 },
-      )
-      const d = typeof res === 'string' ? JSON.parse(res) : (res as any)
-      if (!d?.campo || !String(d.valor ?? '').trim()) return null
-      const acaoCfg: AcaoAgente = {
-        tipo: 'atualizar_config',
-        dados: { campo: d.campo, valor: String(d.valor).trim() },
-        descricao: `Atualizar ${CAMPOS_CONFIG[d.campo] || d.campo} para "${String(d.valor).trim()}"`,
-      }
-      return validarAcao(acaoCfg) ? null : acaoCfg
-    } catch {
-      return null
-    }
-  }
-
-  const montarCriacao = async (
-    tipo: 'acao' | 'insight',
-    textoUsuario: string,
-  ): Promise<AcaoAgente | null> => {
-    try {
-      const res = await enviarMensagem(
-        [
-          { role: 'system', content: construirSystemPromptMontarCriacao(tipo, textoUsuario) },
-          { role: 'user', content: 'Monte os campos no formato JSON pedido.' },
-        ],
-        { response_format: { type: 'json_object' }, temperature: 0, max_tokens: 500 },
-      )
-      const d = typeof res === 'string' ? JSON.parse(res) : (res as any)
-      if (tipo === 'acao' && d?.titulo_acao) {
-        return {
-          tipo: 'criar_acao',
-          dados: d,
-          descricao: `Criar a ação "${d.titulo_acao}"`,
-        }
-      }
-      if (tipo === 'insight' && d?.titulo) {
-        return {
-          tipo: 'criar_insight',
-          dados: d,
-          descricao: `Criar o insight "${d.titulo}"`,
-        }
-      }
-      return null
-    } catch {
-      return null
+      return { acao: null, formulario: null }
     }
   }
 
@@ -301,6 +173,20 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
 
     try {
       const contextoFinal = { ...contextoDadosIniciais, ...contextoDadosAdicionais }
+
+      // Agente de documentos (sem memória): lê os arquivos desta mensagem
+      // isoladamente. É o que evita ele confundir com arquivos antigos.
+      if (contextoFinal.arquivos?.length) {
+        const analises = await analisarDocumentos(contextoFinal.arquivos)
+        analisesRef.current = [...analisesRef.current, ...analises]
+        contextoFinal.analiseArquivos = blocoDeAnalises(
+          analises,
+          analisesRef.current.slice(0, -analises.length),
+        )
+      } else if (analisesRef.current.length) {
+        // Sem anexo agora: só o índice do que já foi lido na conversa
+        contextoFinal.analiseArquivos = blocoDeAnalises([], analisesRef.current)
+      }
 
       // RAG: busca vetorial nos documentos de treinamento antes de montar o prompt
       if (texto && !systemMessageOverride) {
@@ -493,6 +379,7 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
   const mudarSessao = async (id: string) => {
     setSessaoId(id)
     aplicar(() => [])
+    analisesRef.current = []
     await carregarHistorico(id)
   }
 

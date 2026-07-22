@@ -209,29 +209,10 @@ ${REGRAS_RESPOSTA}`
     )
   }
 
-  // Arquivos que o dono anexou nesta mensagem (PDF ou texto)
-  if (ctx.arquivos?.length) {
-    const limitePorArquivo = Math.floor(20000 / ctx.arquivos.length)
-    const nomes = ctx.arquivos.map((a: any) => `"${a.nome}"`).join(', ')
-    prompt += bloco(
-      `Arquivos enviados agora (${ctx.arquivos.length}): ${nomes}`,
-      ctx.arquivos
-        .map(
-          (a: any, i: number) =>
-            `━━━ ARQUIVO ${i + 1} de ${ctx.arquivos.length}: ${a.nome} ━━━\n${String(a.texto || '').slice(0, limitePorArquivo)}`,
-        )
-        .join('\n\n') +
-        `
-
-COMO TRATAR VÁRIOS ARQUIVOS:
-- São ${ctx.arquivos.length} arquivos SEPARADOS. Não misture o conteúdo de um com o do outro.
-- Analise cada um por vez e, na resposta, diga claramente de qual arquivo veio cada
-  informação, usando o nome dele.
-- Se o pedido for comparar, aí sim relacione — mas deixe explícito o que é de cada um.
-- Só use estes arquivos para a análise pedida agora. Arquivos de mensagens anteriores
-  desta conversa continuam disponíveis: se o dono pedir para retomar, comparar ou
-  reanalisar um deles, você pode e deve fazer isso, identificando-o pelo nome.`,
-    )
+  // Leitura dos arquivos, feita antes por um agente dedicado e sem memória.
+  // Ele recebe a análise pronta, não o texto bruto — assim não mistura arquivos.
+  if (ctx.analiseArquivos) {
+    prompt += bloco('Arquivos da conversa', String(ctx.analiseArquivos))
   }
 
   // Trechos recuperados dos documentos de treinamento (busca vetorial)

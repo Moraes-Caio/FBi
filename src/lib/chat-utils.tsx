@@ -71,7 +71,7 @@ export function parseInline(text: string, classeLink: string = LINK_CLARO): Reac
 export function FormattedMessage({ content }: { content: string }) {
   const lines = content.split('\n')
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5 break-words">
       {lines.map((line, i) => {
         if (line.trim().startsWith('- ')) {
           return (

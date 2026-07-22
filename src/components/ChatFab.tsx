@@ -769,7 +769,7 @@ export function ChatFab({
 
         <SheetContent
           semOverlay
-          className="w-full sm:max-w-[380px] p-0 flex flex-col h-full border-l shadow-2xl"
+          className="w-full sm:max-w-[380px] p-0 flex flex-col h-full overflow-hidden border-l-2 border-gray-300 shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.25)]"
           // Sem isto, fechar o popup (Esc ou clique fora) fecha o chat junto:
           // o evento do dialog aninhado borbulha para o Sheet.
           onEscapeKeyDown={(e) => { if (temPopupAberto) e.preventDefault() }}
@@ -935,7 +935,7 @@ export function ChatFab({
               <div
                 ref={areaRolagemRef}
                 onScroll={aoRolar}
-                className="relative flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-white"
+                className="relative flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-4 bg-white"
               >
                 {messagesToRender.map((msg, i) => {
                   const isLast = i === messagesToRender.length - 1
@@ -951,7 +951,7 @@ export function ChatFab({
                       <div className={cn('group/msg flex w-full gap-1', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
                         <div
                           className={cn(
-                            'px-4 py-3 rounded-2xl text-sm max-w-[85%] shadow-sm',
+                            'px-4 py-3 rounded-2xl text-sm max-w-[85%] min-w-0 break-words shadow-sm',
                             msg.role === 'user'
                               ? 'bg-[#1D4ED8] text-white rounded-tr-none'
                               : 'bg-[#F9FAFB] text-[#1F2937] border border-gray-100 rounded-tl-none',
