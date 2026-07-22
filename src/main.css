@@ -116,13 +116,24 @@
   }
 }
 
-/* Esconde a barra de rolagem mantendo a rolagem funcionando.
-   Usada no chat e no visualizador de anexos. */
-.sem-barra {
+/* Rolagem sem barra visível em TODO o app.
+   Aplicar por classe não resolvia: cada página, menu, tabela e diálogo tem o
+   seu próprio container rolável, e bastava um sem a classe para a barra
+   reaparecer. A rolagem continua normal — roda do mouse, arrasto e teclado. */
+*,
+*::before,
+*::after {
   scrollbar-width: none;          /* Firefox */
   -ms-overflow-style: none;       /* Edge antigo */
 }
-.sem-barra::-webkit-scrollbar {   /* Chrome, Safari */
-  width: 0;
-  height: 0;
+*::-webkit-scrollbar {            /* Chrome, Safari, Edge */
+  width: 0 !important;
+  height: 0 !important;
+  display: none;
+}
+
+/* Mantida como apelido: já está aplicada em vários pontos do chat. */
+.sem-barra {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }

@@ -21,7 +21,7 @@ export default function Layout() {
           style={{ marginRight: chatAberto ? LARGURA_CHAT : 0 }}
         >
           <TopHeader />
-          <div className="flex-1 min-h-0 overflow-auto p-4 sm:p-6 lg:p-8 animate-fade-in">
+          <div className="flex-1 min-h-0 overflow-auto sem-barra p-4 sm:p-6 lg:p-8 animate-fade-in">
             <Outlet />
           </div>
         </main>

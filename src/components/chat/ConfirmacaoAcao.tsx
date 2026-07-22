@@ -92,7 +92,7 @@ export function ConfirmacaoAcao({
             <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground -mb-1">
               <Pencil className="h-3 w-3" /> Você pode ajustar antes de confirmar
             </p>
-            <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+            <div className="space-y-4 max-h-[50vh] overflow-y-auto sem-barra pr-1">
               {editaveis.map((k) => (
                 <div key={k} className="space-y-1.5">
                   <Label className="text-xs">{rotulo(k)}</Label>
