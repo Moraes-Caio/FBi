@@ -363,10 +363,23 @@ Responda APENAS com este JSON:
 - "insight": padrão ou observação sobre os feedbacks.
 - "config": dado do perfil (mesas, horário, nome, cozinha, ticket, público...).
 - "anotacao": um fato para lembrar depois.
-- "conversa": pergunta, opinião, análise, bate-papo. Use "nenhuma" na operação.
+- "conversa": pergunta, opinião, análise, bate-papo, OU pedido sobre o próprio
+  sistema/chat/formulário. Use "nenhuma" na operação.
 
 Arquivar, desativar, remover, tirar ou apagar = operação "excluir" (nunca "editar").
-Se ele só perguntou ou comentou, é "conversa" + "nenhuma".`,
+
+EXEMPLOS:
+"crie uma ação de reparar as mesas" -> acao / criar
+"marca a ação X como concluída" -> acao / editar
+"apaga o insight da sobremesa" -> insight / excluir
+"agora são 30 mesas" -> config / editar
+"lembra que o fornecedor entrega às terças" -> anotacao / criar
+"como estão minhas avaliações?" -> conversa / nenhuma
+"resumo das reclamações" -> conversa / nenhuma
+"me mostra um exemplo de formulário" -> conversa / nenhuma
+
+Na dúvida, prefira "conversa" + "nenhuma": é melhor não mexer em nada do que mexer errado.
+Nunca invente uma operação que o dono não pediu.`,
         },
         { role: 'user', content: 'Classifique no formato JSON pedido.' },
       ],
@@ -567,68 +580,110 @@ Devolva null se for pergunta, ou se o valor for igual ao atual, ou se nada corre
   }
 }
 
-/** Escolhe qual item existente alterar e o que mudar nele. */
+/**
+ * Agente de UMA tarefa: qual item da lista o dono quer? Recebe só id + título
+ * (não os campos todos), para focar em casar o pedido com o item certo.
+ */
+export async function identificarItem(
+  pedido: string,
+  itens: Array<Record<string, any>>,
+): Promise<string | null> {
+  if (!itens.length) return null
+  try {
+    const lista = itens.map((i) => ({ id: i.id, titulo: i.titulo_acao || i.titulo }))
+    const res = await enviarMensagem(
+      [
+        {
+          role: 'system',
+          content: `Qual item da lista o dono está mencionando? Só isso.
+
+Lista: ${JSON.stringify(lista)}
+Pedido dele: "${pedido}"
+
+Responda APENAS com este JSON: { "id": "<id exato da lista, ou null>" }
+Use o id EXATO de um item. Se nenhum corresponder claramente ao pedido, devolva null.
+Não invente id.`,
+        },
+        { role: 'user', content: 'Responda no formato JSON pedido.' },
+      ],
+      { ...JSON_OPTS, max_tokens: 60 },
+    )
+    const d = parse(res)
+    const id = d?.id ? String(d.id) : null
+    return id && itens.some((i) => String(i.id) === id) ? id : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Agente de UMA tarefa: dado o item já identificado, quais campos mudam?
+ * Recebe o item concreto, não a lista inteira — sem chance de trocar de alvo.
+ */
+async function montarMudanca(
+  pedido: string,
+  alvo: 'acao' | 'insight',
+  item: Record<string, any>,
+): Promise<Record<string, any> | null> {
+  try {
+    const campos =
+      alvo === 'acao'
+        ? '"titulo_acao", "plano_detalhado", "prioridade" (URGENTE|IMPORTANTE|OBSERVACAO), "categoria", "status" (SUGERIDA|PENDENTE|EM_ANDAMENTO|CONCLUIDO)'
+        : '"titulo", "descricao", "sugestao", "prioridade" (URGENTE|IMPORTANTE|OBSERVACAO), "categoria"'
+    const res = await enviarMensagem(
+      [
+        {
+          role: 'system',
+          content: `O dono quer alterar ESTE ${alvo === 'acao' ? 'ação' : 'insight'}:
+${JSON.stringify(item)}
+
+Pedido dele: "${pedido}"
+
+Responda APENAS com este JSON: { "campos": { ...só os campos que mudam } }
+Campos possíveis: ${campos}
+Inclua SOMENTE o que o dono pediu para mudar, com o valor novo. Não repita o que já está
+igual. Se não der para entender o que muda, devolva { "campos": {} }.`,
+        },
+        { role: 'user', content: 'Responda no formato JSON pedido.' },
+      ],
+      { ...JSON_OPTS, max_tokens: 300 },
+    )
+    const d = parse(res)
+    return d?.campos && typeof d.campos === 'object' && Object.keys(d.campos).length ? d.campos : null
+  } catch {
+    return null
+  }
+}
+
+/** Coordena identificação + mudança para editar/excluir um item existente. */
 export async function montarEdicao(
   pedido: string,
   alvo: 'acao' | 'insight',
   operacao: 'editar' | 'excluir',
   itens: Array<Record<string, any>>,
 ): Promise<AcaoAgente | null> {
-  if (!itens.length) return null
-  try {
-    const campos =
-      alvo === 'acao'
-        ? '"titulo_acao", "plano_detalhado", "prioridade", "categoria", "status" (SUGERIDA|PENDENTE|EM_ANDAMENTO|CONCLUIDO)'
-        : '"titulo", "descricao", "sugestao", "prioridade", "categoria"'
-    const res = await enviarMensagem(
-      [
-        {
-          role: 'system',
-          content: `O dono quer ${operacao === 'excluir' ? 'REMOVER' : 'ALTERAR'} ${alvo === 'acao' ? 'uma ação' : 'um insight'}.
+  const id = await identificarItem(pedido, itens)
+  if (!id) return null
+  const item = itens.find((i) => String(i.id) === id)!
+  const rotulo = item.titulo_acao || item.titulo || 'item'
 
-Itens existentes: ${JSON.stringify(itens)}
-Pedido dele: "${pedido}"
-
-JSON: ${
-            operacao === 'excluir'
-              ? '{ "id": "<id exato da lista, ou null>" }'
-              : `{ "id": "<id exato da lista, ou null>", "campos": { ...só o que muda } }
-Campos possíveis: ${campos}`
-          }
-
-Use o id EXATO de um item da lista. Se nenhum corresponder ao pedido, devolva id null.
-${alvo === 'insight' ? 'Insight não tem status: arquivar/desativar é remoção.' : ''}`,
-        },
-        { role: 'user', content: 'Responda no formato JSON pedido.' },
-      ],
-      { ...JSON_OPTS, max_tokens: 400 },
-    )
-    const d = parse(res)
-    if (!d?.id) return null
-
-    const item = itens.find((i) => String(i.id) === String(d.id))
-    const rotulo = item?.titulo_acao || item?.titulo || 'item'
-
-    if (operacao === 'excluir') {
-      const a: AcaoAgente = {
-        tipo: alvo === 'acao' ? 'excluir_acao' : 'excluir_insight',
-        dados: { id: d.id },
-        descricao: `${alvo === 'acao' ? 'Excluir a ação' : 'Arquivar o insight'} "${rotulo}"`,
-      }
-      return validarAcao(a) ? null : a
-    }
-
-    const camposMudados = d.campos && typeof d.campos === 'object' ? d.campos : null
-    if (!camposMudados || !Object.keys(camposMudados).length) return null
+  if (operacao === 'excluir') {
     const a: AcaoAgente = {
-      tipo: alvo === 'acao' ? 'editar_acao' : 'editar_insight',
-      dados: { id: d.id, ...camposMudados },
-      descricao: `Alterar ${alvo === 'acao' ? 'a ação' : 'o insight'} "${rotulo}"`,
+      tipo: alvo === 'acao' ? 'excluir_acao' : 'excluir_insight',
+      dados: { id },
+      descricao: `${alvo === 'acao' ? 'Excluir a ação' : 'Arquivar o insight'} "${rotulo}"`,
     }
     return validarAcao(a) ? null : a
-  } catch {
-    return null
   }
+
+  const campos = await montarMudanca(pedido, alvo, item)
+  if (!campos) return null
+  const a: AcaoAgente = {
+    tipo: alvo === 'acao' ? 'editar_acao' : 'editar_insight',
+    dados: { id, ...campos },
+    descricao: `Alterar ${alvo === 'acao' ? 'a ação' : 'o insight'} "${rotulo}"`,
+  }
+  return validarAcao(a) ? null : a
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
