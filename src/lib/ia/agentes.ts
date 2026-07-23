@@ -396,13 +396,15 @@ export async function montarAcao(pedido: string): Promise<AcaoAgente | null> {
       [
         {
           role: 'system',
-          content: `O dono pediu uma AÇÃO operacional. Monte os campos.
-Pedido: "${pedido}"
+          content: `Você monta os campos de UMA ação operacional de restaurante. Só isso.
+Assunto da ação: "${pedido}"
 
-JSON: { "titulo_acao": "...", "plano_detalhado": "passos práticos",
+JSON: { "titulo_acao": "curto, direto ao ponto do assunto",
+"plano_detalhado": "passos práticos para resolver ESSE assunto",
 "prioridade": "URGENTE|IMPORTANTE|OBSERVACAO", "categoria": "Servico|Comida|Ambiente|Preco|Agilidade|Geral",
 "status": "PENDENTE" }
 
+Fique estritamente no assunto acima — não invente outro tema nem fale do sistema/chat.
 Sem prioridade dita, use IMPORTANTE. Português do Brasil. Nunca deixe campo vazio.`,
         },
         { role: 'user', content: 'Monte no formato JSON pedido.' },
@@ -423,78 +425,72 @@ Sem prioridade dita, use IMPORTANTE. Português do Brasil. Nunca deixe campo vaz
 }
 
 /**
- * Decide, para um pedido de CRIAR, se já dá para montar a alteração ou se falta
- * o essencial e é melhor perguntar. Quando falta, devolve um formulário — que a
- * interface mostra no lugar do campo de texto, uma pergunta por vez.
+ * Agente de UMA tarefa: existe um assunto concreto no pedido de criar?
+ * Separado da montagem para não inventar assunto quando não há (era o que
+ * fazia a IA criar "ação sobre formulários" a partir de um pedido meta).
  */
-export async function montarCriacao(
+export async function extrairAssunto(
   tipo: 'acao' | 'insight',
   pedido: string,
-): Promise<{ acao: AcaoAgente | null; formulario: FormularioIA | null }> {
-  const vazio = { acao: null, formulario: null }
+): Promise<{ temAssunto: boolean; assunto: string }> {
   try {
-    const nome = tipo === 'acao' ? 'AÇÃO operacional' : 'INSIGHT'
-    const camposAcao =
-      '"titulo_acao", "plano_detalhado", "prioridade" (URGENTE|IMPORTANTE|OBSERVACAO), "categoria", "status": "PENDENTE"'
-    const camposInsight =
-      '"titulo", "descricao", "sugestao", "prioridade" (URGENTE|IMPORTANTE|OBSERVACAO), "categoria"'
+    const alvo = tipo === 'acao' ? 'uma AÇÃO operacional' : 'um INSIGHT'
     const res = await enviarMensagem(
       [
         {
           role: 'system',
-          content: `O dono pediu para criar um(a) ${nome}. Pedido: "${pedido}"
+          content: `O dono pediu para criar ${alvo}. Sua única tarefa: dizer se o pedido já
+contém um ASSUNTO CONCRETO — um problema, tarefa ou tema real do restaurante.
 
-Decida:
-- Se o pedido JÁ DIZ o que fazer (tem um assunto/tema, ex: "reparar as mesas",
-  "atendimento está lento"), monte a criação completa preenchendo os campos.
-- Se o pedido for GENÉRICO (ex: "crie uma ação", sem dizer sobre o quê), NÃO invente
-  o assunto: devolva um formulário com no máximo 2 perguntas para descobrir o essencial.
-
-Formulário: perguntas com alternativas trazem "opcoes"; perguntas abertas vêm SEM "opcoes".
-Nunca pergunte o que tem padrão. Para uma ação, pergunte no máximo o assunto (aberto) e a
-prioridade. Para insight, o assunto (aberto).
-Se perguntar a prioridade, as opções são EXATAMENTE: URGENTE, IMPORTANTE, OBSERVACAO
-(nunca "Baixa/Média/Alta"). O valor de prioridade em "criar" também só pode ser um desses.
+Pedido: "${pedido}"
 
 Responda APENAS com este JSON:
-{
-  "criar": { ${tipo === 'acao' ? camposAcao : camposInsight} } | null,
-  "formulario": {
-    "titulo": "frase introdutória",
-    "campos": [ { "nome": "chave", "label": "Pergunta?", "tipo": "texto|escolha", "opcoes": ["a","b"], "obrigatorio": true } ]
-  } | null
-}
-Preencha "criar" OU "formulario", nunca os dois. Português do Brasil.`,
+{ "temAssunto": true|false, "assunto": "o tema, em poucas palavras" }
+
+temAssunto = false quando o pedido:
+- é genérico ("crie uma ação", "cria um insight", "faz uma tarefa");
+- é meta ou sobre o próprio sistema ("faça aparecer o formulário", "me mostra um exemplo");
+- não descreve nada concreto do restaurante.
+
+NUNCA invente um assunto. Se não houver um assunto real e específico no pedido,
+temAssunto é false e "assunto" fica vazio.`,
         },
-        { role: 'user', content: 'Decida e responda no formato JSON pedido.' },
+        { role: 'user', content: 'Responda no formato JSON pedido.' },
       ],
-      { ...JSON_OPTS, max_tokens: 600 },
+      { ...JSON_OPTS, max_tokens: 120 },
     )
     const d = parse(res)
-    if (!d) return vazio
-
-    if (d.criar && (d.criar.titulo_acao || d.criar.titulo)) {
-      const a: AcaoAgente =
-        tipo === 'acao'
-          ? { tipo: 'criar_acao', dados: d.criar, descricao: `Criar a ação "${d.criar.titulo_acao}"` }
-          : { tipo: 'criar_insight', dados: d.criar, descricao: `Criar o insight "${d.criar.titulo}"` }
-      return { acao: validarAcao(a) ? null : a, formulario: null }
-    }
-
-    if (d.formulario?.campos?.length) {
-      return {
-        acao: null,
-        formulario: {
-          titulo: String(d.formulario.titulo || 'Me conte um pouco mais'),
-          campos: d.formulario.campos.slice(0, 2),
-          acao_pretendida: tipo === 'acao' ? 'criar_acao' : 'criar_insight',
-        } as FormularioIA & { acao_pretendida: string },
-      }
-    }
-    return vazio
+    const assunto = String(d?.assunto || '').trim()
+    return { temAssunto: !!d?.temAssunto && assunto.length > 2, assunto }
   } catch {
-    return vazio
+    return { temAssunto: false, assunto: '' }
   }
+}
+
+/**
+ * Formulários de criação são FIXOS — sem IA. Perguntar sempre a mesma coisa é
+ * mais confiável e não custa chamada. Campo aberto para o assunto; alternativas
+ * quando o valor é de um conjunto conhecido (prioridade).
+ */
+export const FORM_CRIAR_ACAO: FormularioIA & { acao_pretendida: string } = {
+  titulo: 'Vamos criar a ação. Me conta:',
+  acao_pretendida: 'criar_acao',
+  campos: [
+    { nome: 'assunto', label: 'O que precisa ser feito?', tipo: 'texto', obrigatorio: true },
+    {
+      nome: 'prioridade',
+      label: 'Qual a prioridade?',
+      tipo: 'escolha',
+      opcoes: ['Urgente', 'Importante', 'Observação'],
+      obrigatorio: false,
+    },
+  ],
+}
+
+export const FORM_CRIAR_INSIGHT: FormularioIA & { acao_pretendida: string } = {
+  titulo: 'Vamos criar o insight. Me conta:',
+  acao_pretendida: 'criar_insight',
+  campos: [{ nome: 'assunto', label: 'Sobre o que é o insight?', tipo: 'texto', obrigatorio: true }],
 }
 
 /** Monta os campos de um insight novo. */
@@ -504,12 +500,14 @@ export async function montarInsight(pedido: string): Promise<AcaoAgente | null> 
       [
         {
           role: 'system',
-          content: `O dono pediu um INSIGHT. Monte os campos.
-Pedido: "${pedido}"
+          content: `Você monta os campos de UM insight de restaurante. Só isso.
+Assunto do insight: "${pedido}"
 
-JSON: { "titulo": "...", "descricao": "o que foi observado", "sugestao": "o que fazer",
-"prioridade": "URGENTE|IMPORTANTE|OBSERVACAO", "categoria": "Servico|Comida|Ambiente|Preco|Agilidade|Geral" }
+JSON: { "titulo": "curto, sobre ESSE assunto", "descricao": "o que foi observado",
+"sugestao": "o que fazer", "prioridade": "URGENTE|IMPORTANTE|OBSERVACAO",
+"categoria": "Servico|Comida|Ambiente|Preco|Agilidade|Geral" }
 
+Fique estritamente no assunto acima — não invente outro tema nem fale do sistema/chat.
 Sem prioridade dita, use IMPORTANTE. Português do Brasil. Nunca deixe campo vazio.`,
         },
         { role: 'user', content: 'Monte no formato JSON pedido.' },
@@ -659,15 +657,21 @@ export async function decidirAlteracao(
     return so(dominio === 'config' ? await montarConfig(mensagem, ctx.configAtual) : null)
   }
 
+  // Criar: um agente decide se há assunto; se não, mostra o formulário fixo
+  if ((dominio === 'acao' || dominio === 'insight') && operacao === 'criar') {
+    const { temAssunto, assunto } = await extrairAssunto(dominio, mensagem)
+    if (!temAssunto) {
+      return { acao: null, formulario: dominio === 'acao' ? FORM_CRIAR_ACAO : FORM_CRIAR_INSIGHT }
+    }
+    const pedido = assunto || mensagem
+    return so(dominio === 'acao' ? await montarAcao(pedido) : await montarInsight(pedido))
+  }
+
   switch (dominio) {
     case 'acao':
-      return operacao === 'criar'
-        ? montarCriacao('acao', mensagem)
-        : so(await montarEdicao(mensagem, 'acao', operacao === 'excluir' ? 'excluir' : 'editar', ctx.acoes))
+      return so(await montarEdicao(mensagem, 'acao', operacao === 'excluir' ? 'excluir' : 'editar', ctx.acoes))
     case 'insight':
-      return operacao === 'criar'
-        ? montarCriacao('insight', mensagem)
-        : so(await montarEdicao(mensagem, 'insight', operacao === 'excluir' ? 'excluir' : 'editar', ctx.insights))
+      return so(await montarEdicao(mensagem, 'insight', operacao === 'excluir' ? 'excluir' : 'editar', ctx.insights))
     case 'config':
       return so(await montarConfig(mensagem, ctx.configAtual))
     case 'anotacao':
