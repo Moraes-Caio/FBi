@@ -1,6 +1,6 @@
 import { enviarMensagem, enviarMensagemComFontes } from '@/lib/openrouter'
 import { CAMPOS_CONFIG } from '@/lib/queries/config-update'
-import { AcaoAgente, validarAcao } from '@/lib/queries/agente-ia'
+import { AcaoAgente, FormularioIA, validarAcao } from '@/lib/queries/agente-ia'
 
 /**
  * Time de agentes especializados.
@@ -422,6 +422,81 @@ Sem prioridade dita, use IMPORTANTE. Português do Brasil. Nunca deixe campo vaz
   }
 }
 
+/**
+ * Decide, para um pedido de CRIAR, se já dá para montar a alteração ou se falta
+ * o essencial e é melhor perguntar. Quando falta, devolve um formulário — que a
+ * interface mostra no lugar do campo de texto, uma pergunta por vez.
+ */
+export async function montarCriacao(
+  tipo: 'acao' | 'insight',
+  pedido: string,
+): Promise<{ acao: AcaoAgente | null; formulario: FormularioIA | null }> {
+  const vazio = { acao: null, formulario: null }
+  try {
+    const nome = tipo === 'acao' ? 'AÇÃO operacional' : 'INSIGHT'
+    const camposAcao =
+      '"titulo_acao", "plano_detalhado", "prioridade" (URGENTE|IMPORTANTE|OBSERVACAO), "categoria", "status": "PENDENTE"'
+    const camposInsight =
+      '"titulo", "descricao", "sugestao", "prioridade" (URGENTE|IMPORTANTE|OBSERVACAO), "categoria"'
+    const res = await enviarMensagem(
+      [
+        {
+          role: 'system',
+          content: `O dono pediu para criar um(a) ${nome}. Pedido: "${pedido}"
+
+Decida:
+- Se o pedido JÁ DIZ o que fazer (tem um assunto/tema, ex: "reparar as mesas",
+  "atendimento está lento"), monte a criação completa preenchendo os campos.
+- Se o pedido for GENÉRICO (ex: "crie uma ação", sem dizer sobre o quê), NÃO invente
+  o assunto: devolva um formulário com no máximo 2 perguntas para descobrir o essencial.
+
+Formulário: perguntas com alternativas trazem "opcoes"; perguntas abertas vêm SEM "opcoes".
+Nunca pergunte o que tem padrão. Para uma ação, pergunte no máximo o assunto (aberto) e a
+prioridade. Para insight, o assunto (aberto).
+Se perguntar a prioridade, as opções são EXATAMENTE: URGENTE, IMPORTANTE, OBSERVACAO
+(nunca "Baixa/Média/Alta"). O valor de prioridade em "criar" também só pode ser um desses.
+
+Responda APENAS com este JSON:
+{
+  "criar": { ${tipo === 'acao' ? camposAcao : camposInsight} } | null,
+  "formulario": {
+    "titulo": "frase introdutória",
+    "campos": [ { "nome": "chave", "label": "Pergunta?", "tipo": "texto|escolha", "opcoes": ["a","b"], "obrigatorio": true } ]
+  } | null
+}
+Preencha "criar" OU "formulario", nunca os dois. Português do Brasil.`,
+        },
+        { role: 'user', content: 'Decida e responda no formato JSON pedido.' },
+      ],
+      { ...JSON_OPTS, max_tokens: 600 },
+    )
+    const d = parse(res)
+    if (!d) return vazio
+
+    if (d.criar && (d.criar.titulo_acao || d.criar.titulo)) {
+      const a: AcaoAgente =
+        tipo === 'acao'
+          ? { tipo: 'criar_acao', dados: d.criar, descricao: `Criar a ação "${d.criar.titulo_acao}"` }
+          : { tipo: 'criar_insight', dados: d.criar, descricao: `Criar o insight "${d.criar.titulo}"` }
+      return { acao: validarAcao(a) ? null : a, formulario: null }
+    }
+
+    if (d.formulario?.campos?.length) {
+      return {
+        acao: null,
+        formulario: {
+          titulo: String(d.formulario.titulo || 'Me conte um pouco mais'),
+          campos: d.formulario.campos.slice(0, 2),
+          acao_pretendida: tipo === 'acao' ? 'criar_acao' : 'criar_insight',
+        } as FormularioIA & { acao_pretendida: string },
+      }
+    }
+    return vazio
+  } catch {
+    return vazio
+  }
+}
+
 /** Monta os campos de um insight novo. */
 export async function montarInsight(pedido: string): Promise<AcaoAgente | null> {
   try {
@@ -576,33 +651,36 @@ export async function decidirAlteracao(
   mensagem: string,
   ultimaResposta: string,
   ctx: ContextoAgente,
-): Promise<AcaoAgente | null> {
+): Promise<{ acao: AcaoAgente | null; formulario: (FormularioIA & { acao_pretendida?: string }) | null }> {
+  const so = (acao: AcaoAgente | null) => ({ acao, formulario: null })
   const { dominio, operacao } = await rotearPedido(mensagem, ultimaResposta)
   if (dominio === 'conversa' || operacao === 'nenhuma') {
     // Mesmo em "conversa", uma afirmação pode mudar o perfil ("agora são 30 mesas")
-    return dominio === 'config' ? montarConfig(mensagem, ctx.configAtual) : null
+    return so(dominio === 'config' ? await montarConfig(mensagem, ctx.configAtual) : null)
   }
 
   switch (dominio) {
     case 'acao':
       return operacao === 'criar'
-        ? montarAcao(mensagem)
-        : montarEdicao(mensagem, 'acao', operacao === 'excluir' ? 'excluir' : 'editar', ctx.acoes)
+        ? montarCriacao('acao', mensagem)
+        : so(await montarEdicao(mensagem, 'acao', operacao === 'excluir' ? 'excluir' : 'editar', ctx.acoes))
     case 'insight':
       return operacao === 'criar'
-        ? montarInsight(mensagem)
-        : montarEdicao(mensagem, 'insight', operacao === 'excluir' ? 'excluir' : 'editar', ctx.insights)
+        ? montarCriacao('insight', mensagem)
+        : so(await montarEdicao(mensagem, 'insight', operacao === 'excluir' ? 'excluir' : 'editar', ctx.insights))
     case 'config':
-      return montarConfig(mensagem, ctx.configAtual)
+      return so(await montarConfig(mensagem, ctx.configAtual))
     case 'anotacao':
-      return operacao === 'criar'
-        ? {
-            tipo: 'criar_anotacao',
-            dados: { fato: mensagem.slice(0, 300), categoria: 'geral' },
-            descricao: 'Guardar esta informação',
-          }
-        : null
+      return so(
+        operacao === 'criar'
+          ? {
+              tipo: 'criar_anotacao',
+              dados: { fato: mensagem.slice(0, 300), categoria: 'geral' },
+              descricao: 'Guardar esta informação',
+            }
+          : null,
+      )
     default:
-      return null
+      return so(null)
   }
 }

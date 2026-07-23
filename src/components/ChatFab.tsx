@@ -753,10 +753,18 @@ export function ChatFab({
     setFormularioPendente(null)
     if (!form) return
     const resumo = form.campos
-      .map((c) => (respostas[c.nome] ? `${c.label}: ${respostas[c.nome]}` : ''))
+      .map((c) => (respostas[c.nome] ? `${c.label} ${respostas[c.nome]}` : ''))
       .filter(Boolean)
-      .join('; ')
-    if (resumo) handleSend(resumo)
+      .join('. ')
+    if (!resumo) return
+    // Prefixa a intenção para o roteador não classificar as respostas como conversa
+    const prefixo =
+      form.acao_pretendida === 'criar_acao'
+        ? 'Criar a ação: '
+        : form.acao_pretendida === 'criar_insight'
+          ? 'Criar o insight: '
+          : ''
+    handleSend(prefixo + resumo)
   }
 
   if (ocultar) return null

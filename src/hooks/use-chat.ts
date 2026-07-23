@@ -111,12 +111,12 @@ export function useChat(contextoPagina: string, contextoDadosIniciais: any = {})
     ctx: any,
   ): Promise<{ acao: AcaoAgente | null; formulario: (FormularioIA & { acao_pretendida?: string }) | null }> => {
     try {
-      const acao = await decidirAlteracao(textoUsuario, respostaAssistente, {
+      const r = await decidirAlteracao(textoUsuario, respostaAssistente, {
         configAtual: ctx.configAtual || {},
         acoes: ctx.acoes || [],
         insights: ctx.insights || [],
       })
-      return { acao, formulario: null }
+      return { acao: r.acao, formulario: r.formulario }
     } catch {
       return { acao: null, formulario: null }
     }
